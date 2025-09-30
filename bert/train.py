@@ -187,7 +187,8 @@ def train(config: BERTConfig):
             enabled=True,
             wait_steps=config.trace_wait_steps,
             warmup_steps=config.trace_warmup_steps,
-            active_steps=config.trace_active_steps
+            active_steps=config.trace_active_steps,
+            rank=rank
         )
     
     # Training loop

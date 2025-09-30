@@ -144,53 +144,85 @@ torchrun --nproc_per_node=8 bert/train.py \
 
 ## Chakra Execution Trace
 
-### Trace 캡처
+### Trace 캡처 워크플로우
 
-학습 중 자동으로 PyTorch Kineto trace를 생성하고 Chakra ET 파일로 변환합니다:
+학습 중 자동으로 PyTorch trace를 생성하고 Chakra ET 파일로 변환합니다:
 
-- **중간 형식**: Kineto trace JSON (PyTorch profiler 출력)
+**변환 파이프라인:**
+1. **PyTorch Profiler** → Kineto trace JSON (Chrome trace)
+2. **chakra_trace_link** → Host + Device merge
+3. **chakra_converter** → Chakra ET (protobuf)
+
+- **중간 형식**: 
+  - `*_kineto.json`: PyTorch Kineto trace (Chrome JSON)
+  - `*_chakra_host_device.json`: Merged trace (Chakra 입력)
 - **최종 형식**: Chakra Execution Trace (`.et`)
 - **저장 위치**: `./outputs/`
 - **캡처 내용**:
   - Compute operations (forward, backward)
   - Memory operations (allocation, transfer)
   - Communication operations (all-reduce for DDP)
+  - Dependency graph
   - Timing information
-  - Stack traces
 
 ### Trace 파일
 
 ```
 outputs/
-├── gpt2_1gpu_trace_kineto.json      # PyTorch Kineto trace
-├── gpt2_1gpu_trace.et               # Chakra ET 파일 ✓
-├── gpt2_1gpu_trace_stacks.txt       # 분석용 텍스트
-├── gpt2_2gpu_trace_kineto.json
-├── gpt2_2gpu_trace.et               # Chakra ET 파일 ✓
-├── gpt2_8gpu_trace_kineto.json
-├── gpt2_8gpu_trace.et               # Chakra ET 파일 ✓
-├── bert_1gpu_trace_kineto.json
-├── bert_1gpu_trace.et               # Chakra ET 파일 ✓
-├── bert_2gpu_trace_kineto.json
-├── bert_2gpu_trace.et               # Chakra ET 파일 ✓
-├── bert_8gpu_trace_kineto.json
-└── bert_8gpu_trace.et               # Chakra ET 파일 ✓
+├── gpt2_1gpu_quick_trace_kineto.json           # Step 1: Kineto trace
+├── gpt2_1gpu_quick_trace_chakra_host_device.json  # Step 2: Merged
+├── gpt2_1gpu_quick_trace.et                    # Step 3: Chakra ET ✓
+├── gpt2_1gpu_quick_trace_stacks.txt            # 분석용
+├── gpt2_2gpu_quick_trace.et                    # Chakra ET ✓
+├── gpt2_4gpu_quick_trace.et                    # Chakra ET ✓
+├── bert_1gpu_quick_trace.et                    # Chakra ET ✓
+├── bert_2gpu_quick_trace.et                    # Chakra ET ✓
+└── bert_4gpu_quick_trace.et                    # Chakra ET ✓
 ```
 
-### Chakra ET 변환
+### Chakra 의존성 설치
 
-자동 변환이 실패하는 경우 수동으로 변환 가능:
+Dockerfile에 포함된 의존성:
+- **PARAM** (Chakra 필수 의존성)
+- **HolisticTraceAnalysis** (chakra_trace_link 제공)
+- **Chakra** (변환 도구)
+
+수동 설치 (서버에서):
+```bash
+# PARAM 설치
+git clone https://github.com/facebookresearch/param.git
+cd param/train/compute/python
+git checkout 7b19f586dd8b267333114992833a0d7e0d601630
+pip install .
+
+# HolisticTraceAnalysis 설치
+git clone https://github.com/facebookresearch/HolisticTraceAnalysis.git
+cd HolisticTraceAnalysis
+git checkout d731cc2e2249976c97129d409a83bd53d93051f6
+git submodule update --init
+pip install -r requirements.txt
+pip install -e .
+
+# Chakra 재설치
+pip install git+https://github.com/mlcommons/chakra.git
+```
+
+### Chakra ET 변환 (수동)
+
+자동 변환이 실패하는 경우:
 
 ```bash
-# Chakra Python API 사용
-python -m chakra.et_converter.pytorch \
-    --input outputs/gpt2_1gpu_trace_kineto.json \
-    --output outputs/gpt2_1gpu_trace.et
+# Step 1: chakra_trace_link로 host + device merge
+chakra_trace_link \
+    --chakra-host-trace outputs/gpt2_1gpu_quick_trace_kineto.json \
+    --chakra-device-trace outputs/gpt2_1gpu_quick_trace_kineto.json \
+    --rank 0 \
+    --output-file outputs/gpt2_1gpu_quick_trace_chakra_host_device.json
 
-# 또는 직접 Python 스크립트
-from chakra.et_converter.pytorch import PyTorchConverter
-converter = PyTorchConverter()
-converter.convert("input.json", "output.et")
+# Step 2: chakra_converter로 .et 변환
+chakra_converter PyTorch \
+    --input outputs/gpt2_1gpu_quick_trace_chakra_host_device.json \
+    --output outputs/gpt2_1gpu_quick_trace
 ```
 
 ## 데이터셋

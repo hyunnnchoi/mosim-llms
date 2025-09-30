@@ -18,11 +18,33 @@ WORKDIR /workspace
 # Python 패키지 업그레이드
 RUN pip install --upgrade pip setuptools wheel
 
-# Chakra 설치를 위한 의존성 설치
-RUN pip install protobuf>=3.19.0
+# Chakra 및 의존성 설치
+# 1. PARAM 설치 (Chakra 의존성)
+RUN cd /tmp && \
+    git clone https://github.com/facebookresearch/param.git && \
+    cd param/train/compute/python && \
+    git checkout 7b19f586dd8b267333114992833a0d7e0d601630 && \
+    pip install . && \
+    cd / && rm -rf /tmp/param
 
-# Chakra 설치 (GitHub에서 직접 설치)
-RUN pip install git+https://github.com/mlcommons/chakra.git
+# 2. HolisticTraceAnalysis 설치 (chakra_trace_link 필요)
+RUN cd /tmp && \
+    git clone https://github.com/facebookresearch/HolisticTraceAnalysis.git && \
+    cd HolisticTraceAnalysis && \
+    git checkout d731cc2e2249976c97129d409a83bd53d93051f6 && \
+    git submodule update --init && \
+    pip install -r requirements.txt && \
+    pip install -e . && \
+    cd / && rm -rf /tmp/HolisticTraceAnalysis
+
+# 3. Chakra 설치 (GitHub에서 직접 설치)
+RUN pip install protobuf>=3.19.0 && \
+    pip install git+https://github.com/mlcommons/chakra.git
+
+# Chakra 설치 확인
+RUN echo "=== Chakra Tools Verification ===" && \
+    chakra_trace_link --help > /dev/null 2>&1 && echo "✓ chakra_trace_link OK" || echo "✗ chakra_trace_link MISSING" && \
+    chakra_converter --help > /dev/null 2>&1 && echo "✓ chakra_converter OK" || echo "✗ chakra_converter MISSING"
 
 # PyTorch 관련 추가 패키지 설치
 RUN pip install \
