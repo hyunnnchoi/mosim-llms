@@ -1,5 +1,6 @@
 """Data loading utilities for SQuAD dataset."""
 
+import os
 import torch
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from datasets import load_dataset
@@ -132,10 +133,18 @@ def get_dataloaders(
         cache_dir: Cache directory
     
     Returns:
-        train_loader, val_loader
+        train_loader, val_loader, tokenizer
     """
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, cache_dir=cache_dir)
+    # Docker 이미지 내 사전 다운로드된 토크나이저 경로
+    pretrained_path = f"/workspace/pretrained_models/{tokenizer_name}"
+    
+    # 사전 다운로드된 토크나이저가 있으면 사용, 없으면 다운로드
+    if os.path.exists(pretrained_path):
+        print(f"Loading tokenizer from Docker image: {pretrained_path}")
+        tokenizer = AutoTokenizer.from_pretrained(pretrained_path, local_files_only=True)
+    else:
+        print(f"Downloading tokenizer: {tokenizer_name}")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, cache_dir=cache_dir)
     
     # GPT-2는 pad_token이 없으므로 추가
     if model_type == "gpt2" and tokenizer.pad_token is None:

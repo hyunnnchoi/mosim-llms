@@ -265,3 +265,19 @@ outputs/
 ## 라이선스
 
 Apache-2.0 License (Chakra와 동일)
+
+## 🔧 Docker 이미지 최적화
+
+### 사전 다운로드된 모델 & 토크나이저
+
+Docker 이미지에는 다음이 **미리 포함**되어 있습니다:
+
+- ✅ GPT-2 tokenizer (`/workspace/pretrained_models/gpt2`)
+- ✅ BERT tokenizer (`/workspace/pretrained_models/bert-base-uncased`)
+
+**장점:**
+- 인터넷 연결 없이 실행 가능
+- 매번 다운로드할 필요 없음
+- HuggingFace Hub 접근 문제 해결
+
+**자동 폴백:** 이미지 내 토크나이저가 없으면 자동으로 다운로드합니다.

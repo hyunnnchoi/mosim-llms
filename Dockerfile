@@ -33,6 +33,15 @@ RUN pip install \
     numpy \
     pandas
 
+# 사전 학습된 토크나이저 다운로드 (Docker 이미지에 포함)
+RUN mkdir -p /workspace/pretrained_models && \
+    python -c "from transformers import AutoTokenizer; \
+    tok1 = AutoTokenizer.from_pretrained('gpt2'); \
+    tok1.save_pretrained('/workspace/pretrained_models/gpt2'); \
+    tok2 = AutoTokenizer.from_pretrained('bert-base-uncased'); \
+    tok2.save_pretrained('/workspace/pretrained_models/bert-base-uncased'); \
+    print('✓ Tokenizers saved to /workspace/pretrained_models')"
+
 # 프로젝트 파일 복사
 COPY . /workspace/mosim-llms
 
