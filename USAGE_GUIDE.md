@@ -164,22 +164,41 @@ torchrun \
 
 ```
 outputs/
-├── gpt2_1gpu_trace_chrome.json      # Chrome DevTools에서 열기
+├── gpt2_1gpu_trace_kineto.json      # PyTorch Kineto trace (중간)
+├── gpt2_1gpu_trace.et               # Chakra ET 파일 (최종) ✓
 ├── gpt2_1gpu_trace_stacks.txt       # 텍스트 분석
-├── gpt2_2gpu_trace_chrome.json
-├── gpt2_8gpu_trace_chrome.json
-├── bert_1gpu_trace_chrome.json
-├── bert_2gpu_trace_chrome.json
-└── bert_8gpu_trace_chrome.json
+├── gpt2_2gpu_trace_kineto.json
+├── gpt2_2gpu_trace.et               # Chakra ET 파일 ✓
+├── gpt2_8gpu_trace_kineto.json
+├── gpt2_8gpu_trace.et               # Chakra ET 파일 ✓
+├── bert_1gpu_trace_kineto.json
+├── bert_1gpu_trace.et               # Chakra ET 파일 ✓
+├── bert_2gpu_trace_kineto.json
+├── bert_2gpu_trace.et               # Chakra ET 파일 ✓
+├── bert_8gpu_trace_kineto.json
+└── bert_8gpu_trace.et               # Chakra ET 파일 ✓
 ```
 
-### Chrome DevTools로 분석
+### Chakra ET 파일 사용
 
-1. Chrome 브라우저 열기
-2. `chrome://tracing` 접속
-3. "Load" 버튼 클릭
-4. `*_chrome.json` 파일 선택
-5. Trace 시각화 확인
+**주요 출력 파일: `*.et` (Chakra Execution Trace)**
+
+```bash
+# ET 파일 확인
+ls -lh outputs/*.et
+
+# ET 파일은 Chakra 시뮬레이터/분석 도구에서 사용
+# 예: ASTRA-sim, Timeloop 등
+```
+
+### Kineto Trace 시각화 (디버깅용)
+
+```bash
+# Chrome DevTools로 Kineto trace 확인
+# 1. Chrome 브라우저 열기
+# 2. chrome://tracing 접속
+# 3. outputs/*_kineto.json 파일 로드
+```
 
 ### 텍스트 분석
 
@@ -191,13 +210,25 @@ cat outputs/gpt2_1gpu_trace_stacks.txt | head -50
 grep "cuda_time_total" outputs/gpt2_1gpu_trace_stacks.txt
 ```
 
-### Chakra ET 변환 (향후)
+### 수동 ET 변환
+
+자동 변환이 실패한 경우:
 
 ```bash
-# Chakra converter 사용 (설치 필요)
-chakra_converter \
-    --input outputs/gpt2_1gpu_trace_chrome.json \
+# Chakra Python API 사용
+python -m chakra.et_converter.pytorch \
+    --input outputs/gpt2_1gpu_trace_kineto.json \
     --output outputs/gpt2_1gpu_trace.et
+
+# 또는 Python 스크립트
+python << EOF
+from chakra.et_converter.pytorch import PyTorchConverter
+converter = PyTorchConverter()
+converter.convert(
+    "outputs/gpt2_1gpu_trace_kineto.json",
+    "outputs/gpt2_1gpu_trace.et"
+)
+EOF
 ```
 
 ## 출력 파일

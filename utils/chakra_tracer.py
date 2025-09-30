@@ -1,6 +1,7 @@
 """Chakra execution trace capture utilities."""
 
 import os
+import subprocess
 import torch
 import torch.profiler as profiler
 from typing import Optional, Callable
@@ -11,8 +12,8 @@ class ChakraTracer:
     """
     Chakra Execution Trace 캡처를 위한 래퍼 클래스.
     
-    PyTorch Profiler를 사용하여 compute, memory, communication 작업을 추적하고
-    Chakra ET 파일 형식으로 내보냅니다.
+    PyTorch Profiler를 사용하여 Kineto trace를 생성하고,
+    Chakra converter를 통해 ET 파일로 변환합니다.
     """
     
     def __init__(
@@ -26,7 +27,8 @@ class ChakraTracer:
         record_shapes: bool = True,
         profile_memory: bool = True,
         with_stack: bool = True,
-        with_flops: bool = True
+        with_flops: bool = True,
+        convert_to_et: bool = True
     ):
         """
         Args:
@@ -40,18 +42,20 @@ class ChakraTracer:
             profile_memory: Memory profiling 활성화
             with_stack: Python stack trace 포함
             with_flops: FLOPs 계산 포함
+            convert_to_et: Chakra ET 형식으로 자동 변환 여부
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.trace_name = trace_name
         self.enabled = enabled
+        self.convert_to_et = convert_to_et
         
         if not self.enabled:
             self.profiler = None
             return
         
-        # PyTorch Profiler 설정
+        # PyTorch Profiler 설정 (Kineto trace 생성)
         activities = [
             profiler.ProfilerActivity.CPU,
         ]
@@ -74,14 +78,61 @@ class ChakraTracer:
             with_flops=with_flops,
         )
     
+    def _convert_to_chakra_et(self, kineto_trace_path: Path):
+        """Kineto trace를 Chakra ET 파일로 변환"""
+        et_path = self.output_dir / f"{self.trace_name}.et"
+        
+        try:
+            # Chakra converter 실행
+            # 주의: Chakra 설치 후 사용 가능한 converter 명령어
+            # 실제 명령어는 Chakra 버전에 따라 다를 수 있음
+            
+            # 방법 1: Python API 사용 (선호)
+            try:
+                from chakra.et_converter.pytorch import PyTorchConverter
+                
+                converter = PyTorchConverter()
+                converter.convert(
+                    input_filename=str(kineto_trace_path),
+                    output_filename=str(et_path)
+                )
+                print(f"[ChakraTracer] ✓ Chakra ET file saved to {et_path}")
+                return True
+            except ImportError:
+                print(f"[ChakraTracer] Warning: chakra.et_converter not found, trying CLI...")
+                
+                # 방법 2: CLI 도구 사용
+                result = subprocess.run(
+                    [
+                        "python", "-m", "chakra.et_converter.pytorch",
+                        "--input", str(kineto_trace_path),
+                        "--output", str(et_path)
+                    ],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    print(f"[ChakraTracer] ✓ Chakra ET file saved to {et_path}")
+                    return True
+                else:
+                    print(f"[ChakraTracer] Warning: Chakra converter failed: {result.stderr}")
+                    return False
+                    
+        except Exception as e:
+            print(f"[ChakraTracer] Warning: Failed to convert to Chakra ET: {e}")
+            print(f"[ChakraTracer] Kineto trace saved, manual conversion needed:")
+            print(f"  python -m chakra.et_converter.pytorch --input {kineto_trace_path} --output {et_path}")
+            return False
+    
     def _trace_handler(self, prof):
         """Trace 준비 완료 시 호출되는 핸들러"""
-        # Chrome trace 형식으로 저장
-        trace_path = self.output_dir / f"{self.trace_name}_chrome.json"
-        prof.export_chrome_trace(str(trace_path))
-        print(f"[ChakraTracer] Chrome trace saved to {trace_path}")
+        # Kineto trace (JSON) 저장
+        kineto_path = self.output_dir / f"{self.trace_name}_kineto.json"
+        prof.export_chrome_trace(str(kineto_path))
+        print(f"[ChakraTracer] Kineto trace saved to {kineto_path}")
         
-        # Stacks 형식으로 저장
+        # Stacks 분석 저장
         stacks_path = self.output_dir / f"{self.trace_name}_stacks.txt"
         with open(stacks_path, "w") as f:
             f.write(prof.key_averages(group_by_stack_n=5).table(
@@ -89,11 +140,13 @@ class ChakraTracer:
             ))
         print(f"[ChakraTracer] Stack trace saved to {stacks_path}")
         
-        # TODO: Chakra ET 형식으로 변환
-        # 현재는 Chrome trace 형식으로 저장하고,
-        # 추후 Chakra 도구를 사용하여 ET 형식으로 변환 가능
-        print(f"[ChakraTracer] To convert to Chakra ET format, use:")
-        print(f"  chakra_converter --input {trace_path} --output {self.output_dir}/{self.trace_name}.et")
+        # Chakra ET 형식으로 변환
+        if self.convert_to_et:
+            self._convert_to_chakra_et(kineto_path)
+        else:
+            et_path = self.output_dir / f"{self.trace_name}.et"
+            print(f"[ChakraTracer] To convert to Chakra ET format manually, run:")
+            print(f"  python -m chakra.et_converter.pytorch --input {kineto_path} --output {et_path}")
     
     def __enter__(self):
         """Context manager 진입"""

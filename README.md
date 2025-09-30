@@ -146,9 +146,10 @@ torchrun --nproc_per_node=8 bert/train.py \
 
 ### Trace 캡처
 
-학습 중 자동으로 Chakra execution trace를 캡처합니다:
+학습 중 자동으로 PyTorch Kineto trace를 생성하고 Chakra ET 파일로 변환합니다:
 
-- **출력 형식**: Chrome trace JSON (`.json`)
+- **중간 형식**: Kineto trace JSON (PyTorch profiler 출력)
+- **최종 형식**: Chakra Execution Trace (`.et`)
 - **저장 위치**: `./outputs/`
 - **캡처 내용**:
   - Compute operations (forward, backward)
@@ -161,22 +162,35 @@ torchrun --nproc_per_node=8 bert/train.py \
 
 ```
 outputs/
-├── gpt2_1gpu_trace_chrome.json
-├── gpt2_1gpu_trace_stacks.txt
-├── gpt2_2gpu_trace_chrome.json
-├── gpt2_8gpu_trace_chrome.json
-├── bert_1gpu_trace_chrome.json
-├── bert_2gpu_trace_chrome.json
-└── bert_8gpu_trace_chrome.json
+├── gpt2_1gpu_trace_kineto.json      # PyTorch Kineto trace
+├── gpt2_1gpu_trace.et               # Chakra ET 파일 ✓
+├── gpt2_1gpu_trace_stacks.txt       # 분석용 텍스트
+├── gpt2_2gpu_trace_kineto.json
+├── gpt2_2gpu_trace.et               # Chakra ET 파일 ✓
+├── gpt2_8gpu_trace_kineto.json
+├── gpt2_8gpu_trace.et               # Chakra ET 파일 ✓
+├── bert_1gpu_trace_kineto.json
+├── bert_1gpu_trace.et               # Chakra ET 파일 ✓
+├── bert_2gpu_trace_kineto.json
+├── bert_2gpu_trace.et               # Chakra ET 파일 ✓
+├── bert_8gpu_trace_kineto.json
+└── bert_8gpu_trace.et               # Chakra ET 파일 ✓
 ```
 
-### Chakra ET 변환 (예정)
+### Chakra ET 변환
 
-현재는 Chrome trace 형식으로 저장되며, 향후 Chakra 도구를 사용하여 ET 형식으로 변환 가능:
+자동 변환이 실패하는 경우 수동으로 변환 가능:
 
 ```bash
-# 변환 예정 (Chakra converter 사용)
-chakra_converter --input outputs/trace.json --output outputs/trace.et
+# Chakra Python API 사용
+python -m chakra.et_converter.pytorch \
+    --input outputs/gpt2_1gpu_trace_kineto.json \
+    --output outputs/gpt2_1gpu_trace.et
+
+# 또는 직접 Python 스크립트
+from chakra.et_converter.pytorch import PyTorchConverter
+converter = PyTorchConverter()
+converter.convert("input.json", "output.et")
 ```
 
 ## 데이터셋
@@ -232,9 +246,9 @@ checkpoints/
 ### Chakra Traces
 ```
 outputs/
-├── *_chrome.json          # Chrome trace format
+├── *_kineto.json          # PyTorch Kineto trace (중간 형식)
 ├── *_stacks.txt           # Stack trace analysis
-└── *.et                   # Chakra ET format (향후)
+└── *.et                   # Chakra ET format (최종 출력) ✓
 ```
 
 ## 실험 설정

@@ -46,4 +46,6 @@ fi
 echo ""
 echo "Training completed!"
 echo "Checkpoints saved to: ./checkpoints/gpt2"
-echo "Traces saved to: ./outputs/${TRACE_NAME}*"
+echo "Kineto trace saved to: ./outputs/${TRACE_NAME}_kineto.json"
+echo "Chakra ET file saved to: ./outputs/${TRACE_NAME}.et ✓"
+echo "Analysis saved to: ./outputs/${TRACE_NAME}_stacks.txt"

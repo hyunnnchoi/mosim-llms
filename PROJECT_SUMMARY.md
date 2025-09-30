@@ -81,14 +81,15 @@ mosim-llms/
 - **실행**: `torchrun`으로 멀티프로세스 실행
 
 ### 4. Chakra Tracing
-- **도구**: PyTorch Profiler + Chakra
-- **출력 형식**: Chrome trace JSON (`.json`)
+- **도구**: PyTorch Profiler (Kineto) + Chakra Converter
+- **중간 형식**: Kineto trace JSON (`.json`)
+- **최종 형식**: Chakra Execution Trace (`.et`) ✓
 - **캡처 내용**:
   - Compute ops (forward/backward)
   - Memory ops (allocation/transfer)
   - Communication ops (all-reduce for DDP)
   - Timing & stack traces
-- **변환**: 향후 Chakra ET 형식으로 변환 가능
+- **변환**: 자동 ET 변환 (Python API 또는 CLI)
 
 ## 사용 방법
 
@@ -152,13 +153,19 @@ checkpoints/
 ### Chakra Traces
 ```
 outputs/
-├── gpt2_1gpu_trace_chrome.json
-├── gpt2_1gpu_trace_stacks.txt
-├── gpt2_2gpu_trace_chrome.json
-├── gpt2_8gpu_trace_chrome.json
-├── bert_1gpu_trace_chrome.json
-├── bert_2gpu_trace_chrome.json
-└── bert_8gpu_trace_chrome.json
+├── gpt2_1gpu_trace_kineto.json      # Kineto trace (중간)
+├── gpt2_1gpu_trace.et               # Chakra ET (최종) ✓
+├── gpt2_1gpu_trace_stacks.txt       # 텍스트 분석
+├── gpt2_2gpu_trace_kineto.json
+├── gpt2_2gpu_trace.et               # Chakra ET ✓
+├── gpt2_8gpu_trace_kineto.json
+├── gpt2_8gpu_trace.et               # Chakra ET ✓
+├── bert_1gpu_trace_kineto.json
+├── bert_1gpu_trace.et               # Chakra ET ✓
+├── bert_2gpu_trace_kineto.json
+├── bert_2gpu_trace.et               # Chakra ET ✓
+├── bert_8gpu_trace_kineto.json
+└── bert_8gpu_trace.et               # Chakra ET ✓
 ```
 
 ## 기술 스택
