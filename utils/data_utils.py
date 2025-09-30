@@ -66,10 +66,9 @@ class SQuADDataset(Dataset):
             
             # 15% of tokens를 masking
             probability_matrix = torch.full(labels.shape, 0.15)
-            special_tokens_mask = [
-                self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True)
-                for val in labels.tolist()
-            ]
+            special_tokens_mask = self.tokenizer.get_special_tokens_mask(
+                labels.tolist(), already_has_special_tokens=True
+            )
             probability_matrix.masked_fill_(
                 torch.tensor(special_tokens_mask, dtype=torch.bool), value=0.0
             )
