@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  mosim-llms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mosim-llms:latest
+    container_name: mosim-llms-container
+    
+    # GPU 지원 (NVIDIA Docker 필요)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # 볼륨 마운트
+    volumes:
+      - ./outputs:/workspace/mosim-llms/outputs
+      - ./data:/workspace/mosim-llms/data
+      - ./checkpoints:/workspace/mosim-llms/checkpoints
+    
+    # 환경 변수
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+    
+    # 네트워크 설정
+    shm_size: '8gb'
+    
+    # 기본 명령어 오버라이드 (컨테이너 유지)
+    stdin_open: true
+    tty: true
+    
+    command: /bin/bash
