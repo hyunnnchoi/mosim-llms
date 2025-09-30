@@ -215,13 +215,16 @@ def train(config: GPT2Config):
             )
         
         # Evaluate
-        val_loss = evaluate(model, val_loader, config)
+        if not config.skip_eval:
+            val_loss = evaluate(model, val_loader, config)
+        else:
+            val_loss = 0.0  # Skip evaluation
         
         if is_main_process():
             print(f"\nEpoch {epoch}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
             
             # Save best model
-            if val_loss < best_val_loss:
+            if not config.skip_eval and val_loss < best_val_loss:
                 best_val_loss = val_loss
                 save_path = Path(config.save_dir) / "best_model"
                 save_path.mkdir(parents=True, exist_ok=True)
@@ -259,6 +262,7 @@ def main():
     
     # Chakra tracing
     parser.add_argument("--enable-tracing", action="store_true", help="Enable Chakra tracing")
+    parser.add_argument("--skip-eval", action="store_true", help="Skip evaluation (for graph capture)")
     parser.add_argument("--trace-output-dir", type=str, default="./outputs", help="Trace output directory")
     parser.add_argument("--trace-name", type=str, default="gpt2_trace", help="Trace name")
     
@@ -278,6 +282,7 @@ def main():
         max_steps=args.max_steps,
         num_gpus=args.num_gpus,
         enable_tracing=args.enable_tracing,
+        skip_eval=args.skip_eval,
         trace_output_dir=args.trace_output_dir,
         trace_name=args.trace_name,
         save_dir=args.save_dir,
