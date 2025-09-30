@@ -22,6 +22,7 @@ class GPT2Config:
     learning_rate: float = 5e-5
     weight_decay: float = 0.01
     num_epochs: int = 3
+    max_steps: Optional[int] = None  # 학습 조기 종료 (None이면 전체 epoch)
     warmup_steps: int = 500
     max_grad_norm: float = 1.0
     

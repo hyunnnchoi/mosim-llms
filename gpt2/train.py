@@ -81,7 +81,14 @@ def train_one_epoch(
         total_loss += loss_val
         step += 1
         
-        # Logging
+        # Max steps check (계산 그래프 캡처용)
+        if config.max_steps is not None and step >= config.max_steps:
+            if is_main_process():
+                print(f"
+✓ Reached max_steps={config.max_steps}, stopping epoch early")
+            break
+        
+                # Logging
         if is_main_process() and batch_idx % config.logging_steps == 0:
             pbar.set_postfix({
                 "loss": f"{loss_val:.4f}",
@@ -248,6 +255,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size per GPU")
     parser.add_argument("--learning-rate", type=float, default=5e-5, help="Learning rate")
     parser.add_argument("--num-epochs", type=int, default=3, help="Number of epochs")
+    parser.add_argument("--max-steps", type=int, default=None, help="Max training steps (for graph capture)")
     parser.add_argument("--num-gpus", type=int, default=1, choices=[1, 2, 8], help="Number of GPUs")
     
     # Chakra tracing
@@ -268,6 +276,7 @@ def main():
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         num_epochs=args.num_epochs,
+        max_steps=args.max_steps,
         num_gpus=args.num_gpus,
         enable_tracing=args.enable_tracing,
         trace_output_dir=args.trace_output_dir,
