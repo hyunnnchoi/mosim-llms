@@ -84,8 +84,7 @@ def train_one_epoch(
         # Max steps check (계산 그래프 캡처용)
         if config.max_steps is not None and step >= config.max_steps:
             if is_main_process():
-                print(f"
-✓ Reached max_steps={config.max_steps}, stopping epoch early")
+                print(f"\n✓ Reached max_steps={config.max_steps}, stopping epoch early")
             break
         
                 # Logging
