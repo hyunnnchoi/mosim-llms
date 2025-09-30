@@ -135,7 +135,7 @@ def get_dataloaders(
         train_loader, val_loader
     """
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, cache_dir=cache_dir)
     
     # GPT-2는 pad_token이 없으므로 추가
     if model_type == "gpt2" and tokenizer.pad_token is None:
