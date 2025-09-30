@@ -14,7 +14,6 @@ if [ "$MODE" = "gpu" ]; then
         -v $(pwd)/outputs:/workspace/mosim-llms/outputs \
         -v $(pwd)/data:/workspace/mosim-llms/data \
         -v $(pwd)/checkpoints:/workspace/mosim-llms/checkpoints \
-        -e CUDA_VISIBLE_DEVICES=0 \
         mosim-llms:latest
 elif [ "$MODE" = "cpu" ]; then
     echo "Running container with CPU only..."
