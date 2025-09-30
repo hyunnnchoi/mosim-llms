@@ -258,7 +258,7 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=5e-5, help="Learning rate")
     parser.add_argument("--num-epochs", type=int, default=3, help="Number of epochs")
     parser.add_argument("--max-steps", type=int, default=None, help="Max training steps (for graph capture)")
-    parser.add_argument("--num-gpus", type=int, default=1, choices=[1, 2, 8], help="Number of GPUs")
+    parser.add_argument("--num-gpus", type=int, default=1, choices=[1, 2, 4, 8], help="Number of GPUs")
     
     # Chakra tracing
     parser.add_argument("--enable-tracing", action="store_true", help="Enable Chakra tracing")

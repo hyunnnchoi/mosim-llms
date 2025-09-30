@@ -32,7 +32,7 @@ class GPT2Config:
     cache_dir: Optional[str] = None
     
     # Distributed
-    num_gpus: int = 1  # 1, 2, or 8
+    num_gpus: int = 1  # 1, 2, 4, or 8
     backend: str = "nccl"
     
     # Checkpointing
@@ -54,5 +54,5 @@ class GPT2Config:
     
     def __post_init__(self):
         """Validate configuration."""
-        assert self.num_gpus in [1, 2, 8], "num_gpus must be 1, 2, or 8"
+        assert self.num_gpus in [1, 2, 4, 8], "num_gpus must be 1, 2, 4, or 8"
         assert self.batch_size > 0, "batch_size must be positive"
