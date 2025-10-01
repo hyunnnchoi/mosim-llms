@@ -96,41 +96,53 @@ class ChakraTracer:
         Kineto trace를 Chakra ET 파일로 변환
         
         Chakra 워크플로우:
-        PyTorch Kineto trace -> PyTorchConverter -> .et (protobuf)
+        PyTorch Kineto trace -> chakra_converter CLI -> .et (protobuf)
         
-        Note: chakra.et_converter.pytorch.PyTorchConverter API를 사용하여
-        Kineto JSON을 직접 Chakra ET 형식으로 변환합니다.
+        Note: CLI 도구를 사용합니다. Python API는 이미 변환된 Chakra JSON을 입력으로 받지만,
+        CLI는 Kineto JSON을 직접 처리할 수 있습니다.
         """
+        import subprocess
+        
         # 파일 경로 설정
         base_name = kineto_trace_path.stem  # _kineto.json 제외
         if base_name.endswith("_kineto"):
             base_name = base_name[:-7]  # "_kineto" 제거
         
-        # ET 파일 경로
+        # ET 파일 경로 (chakra_converter가 자동으로 .et 추가)
+        et_path_base = self.output_dir / base_name
         et_path = self.output_dir / f"{base_name}.et"
         
         try:
-            # Chakra PyTorchConverter를 사용하여 변환
+            # chakra_converter CLI 도구 사용
             print(f"[ChakraTracer] Converting Kineto trace to Chakra ET format...")
             
-            from chakra.src.converter.pytorch_converter import PyTorchConverter
-            
-            converter = PyTorchConverter()
-            converter.convert(
-                input_filename=str(kineto_trace_path),
-                output_filename=str(et_path),
-                simulate=False  # 시뮬레이션은 비활성화 (시간 절약)
+            result = subprocess.run(
+                [
+                    "chakra_converter", "PyTorch",
+                    "--input", str(kineto_trace_path),
+                    "--output", str(et_path_base)  # .et는 자동 추가됨
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5분 타임아웃
             )
+            
+            if result.returncode != 0:
+                print(f"[ChakraTracer] Warning: chakra_converter failed:")
+                print(f"  {result.stderr}")
+                return False
             
             print(f"[ChakraTracer] ✓ Chakra ET file saved to {et_path}")
             return True
                     
-        except ImportError as e:
-            print(f"[ChakraTracer] Error: Chakra converter not found: {e}")
+        except FileNotFoundError:
+            print(f"[ChakraTracer] Error: chakra_converter command not found")
             print(f"  Make sure Chakra is properly installed.")
-            print(f"  pip install git+https://github.com/mlcommons/chakra.git")
             print(f"\n[ChakraTracer] Alternative: use convert_to_et.py script")
             print(f"  python convert_to_et.py")
+            return False
+        except subprocess.TimeoutExpired:
+            print(f"[ChakraTracer] Warning: Conversion timed out (>5 minutes)")
             return False
         except Exception as e:
             print(f"[ChakraTracer] Warning: Failed to convert to Chakra ET: {e}")

@@ -14,8 +14,8 @@ echo "=========================================="
 echo ""
 
 # Chakra 설치 확인
-if ! python -c "import chakra.src.converter.pytorch_converter" 2>/dev/null; then
-    echo "❌ Chakra converter not found!"
+if ! command -v chakra_converter &> /dev/null; then
+    echo "❌ chakra_converter command not found!"
     echo ""
     echo "Please install Chakra first:"
     echo "  pip install https://github.com/mlcommons/chakra/archive/refs/heads/main.zip"
@@ -47,27 +47,19 @@ for kineto_file in $KINETO_FILES; do
     echo "  Input:  $(basename $kineto_file)"
     echo "  Output: $(basename $et_file)"
     
-    # Chakra converter 실행
-    python << PYTHON
-try:
-    from chakra.src.converter.pytorch_converter import PyTorchConverter
-    
-    converter = PyTorchConverter()
-    converter.convert(
-        input_filename="$kineto_file",
-        output_filename="$et_file",
-        simulate=False
-    )
-    print("  ✓ Conversion successful")
-except Exception as e:
-    print(f"  ✗ Conversion failed: {e}")
-    exit(1)
-PYTHON
+    # Chakra converter 실행 (CLI 사용)
+    chakra_converter PyTorch \
+        --input "$kineto_file" \
+        --output "${et_file%.et}" \
+        > /dev/null 2>&1
     
     if [ $? -eq 0 ]; then
+        echo "  ✓ Conversion successful"
         # 파일 크기 확인
         et_size=$(ls -lh "$et_file" 2>/dev/null | awk '{print $5}')
         echo "  Size: $et_size"
+    else
+        echo "  ✗ Conversion failed"
     fi
     
     echo ""

@@ -6,22 +6,36 @@ import sys
 from pathlib import Path
 
 def convert_trace(kineto_file, et_file):
-    """Convert a single Kineto trace to ET format."""
+    """Convert a single Kineto trace to ET format using chakra_converter CLI."""
+    import subprocess
+    
     try:
-        from chakra.src.converter.pytorch_converter import PyTorchConverter
-        
-        converter = PyTorchConverter()
-        converter.convert(
-            input_filename=str(kineto_file),
-            output_filename=str(et_file),
-            simulate=False  # 시뮬레이션은 비활성화 (시간 절약)
+        # chakra_converter CLI를 사용 (Python API와 달리 Kineto JSON을 직접 처리 가능)
+        result = subprocess.run(
+            [
+                "chakra_converter", "PyTorch",
+                "--input", str(kineto_file),
+                "--output", str(et_file.with_suffix(""))  # .et는 자동 추가됨
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5분 타임아웃
         )
+        
+        if result.returncode != 0:
+            print(f"✗ Error converting {kineto_file.name}: {result.stderr}")
+            return False
+        
         print(f"✓ Converted: {kineto_file.name} → {et_file.name}")
         return True
-    except ImportError as e:
-        print(f"✗ Error: Chakra converter not found: {e}")
+        
+    except FileNotFoundError:
+        print(f"✗ Error: chakra_converter command not found")
         print("\nTo install Chakra:")
         print("  pip install https://github.com/mlcommons/chakra/archive/refs/heads/main.zip")
+        return False
+    except subprocess.TimeoutExpired:
+        print(f"✗ Error: Conversion timed out (>5 minutes)")
         return False
     except Exception as e:
         print(f"✗ Error converting {kineto_file.name}: {e}")
