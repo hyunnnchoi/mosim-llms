@@ -55,7 +55,8 @@ try:
     converter = PyTorchConverter()
     converter.convert(
         input_filename="$kineto_file",
-        output_filename="$et_file"
+        output_filename="$et_file",
+        simulate=False
     )
     print("  ✓ Conversion successful")
 except Exception as e:

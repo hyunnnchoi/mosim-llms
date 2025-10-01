@@ -118,7 +118,8 @@ class ChakraTracer:
             converter = PyTorchConverter()
             converter.convert(
                 input_filename=str(kineto_trace_path),
-                output_filename=str(et_path)
+                output_filename=str(et_path),
+                simulate=False  # 시뮬레이션은 비활성화 (시간 절약)
             )
             
             print(f"[ChakraTracer] ✓ Chakra ET file saved to {et_path}")

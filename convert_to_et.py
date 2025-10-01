@@ -13,7 +13,8 @@ def convert_trace(kineto_file, et_file):
         converter = PyTorchConverter()
         converter.convert(
             input_filename=str(kineto_file),
-            output_filename=str(et_file)
+            output_filename=str(et_file),
+            simulate=False  # 시뮬레이션은 비활성화 (시간 절약)
         )
         print(f"✓ Converted: {kineto_file.name} → {et_file.name}")
         return True
