@@ -14,11 +14,11 @@ echo "=========================================="
 echo ""
 
 # Chakra 설치 확인
-if ! python -c "import chakra.et_converter.pytorch" 2>/dev/null; then
+if ! python -c "import chakra.src.converter.pytorch_converter" 2>/dev/null; then
     echo "❌ Chakra converter not found!"
     echo ""
     echo "Please install Chakra first:"
-    echo "  pip install git+https://github.com/mlcommons/chakra.git"
+    echo "  pip install https://github.com/mlcommons/chakra/archive/refs/heads/main.zip"
     echo ""
     exit 1
 fi
@@ -50,7 +50,7 @@ for kineto_file in $KINETO_FILES; do
     # Chakra converter 실행
     python << PYTHON
 try:
-    from chakra.et_converter.pytorch import PyTorchConverter
+    from chakra.src.converter.pytorch_converter import PyTorchConverter
     
     converter = PyTorchConverter()
     converter.convert(

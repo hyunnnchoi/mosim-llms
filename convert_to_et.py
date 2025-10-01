@@ -8,7 +8,7 @@ from pathlib import Path
 def convert_trace(kineto_file, et_file):
     """Convert a single Kineto trace to ET format."""
     try:
-        from chakra.et_converter.pytorch import PyTorchConverter
+        from chakra.src.converter.pytorch_converter import PyTorchConverter
         
         converter = PyTorchConverter()
         converter.convert(
@@ -20,7 +20,7 @@ def convert_trace(kineto_file, et_file):
     except ImportError as e:
         print(f"✗ Error: Chakra converter not found: {e}")
         print("\nTo install Chakra:")
-        print("  pip install git+https://github.com/mlcommons/chakra.git")
+        print("  pip install https://github.com/mlcommons/chakra/archive/refs/heads/main.zip")
         return False
     except Exception as e:
         print(f"✗ Error converting {kineto_file.name}: {e}")

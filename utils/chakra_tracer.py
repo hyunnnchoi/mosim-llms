@@ -113,7 +113,7 @@ class ChakraTracer:
             # Chakra PyTorchConverter를 사용하여 변환
             print(f"[ChakraTracer] Converting Kineto trace to Chakra ET format...")
             
-            from chakra.et_converter.pytorch import PyTorchConverter
+            from chakra.src.converter.pytorch_converter import PyTorchConverter
             
             converter = PyTorchConverter()
             converter.convert(

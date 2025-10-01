@@ -45,7 +45,7 @@ RUN pip install protobuf>=3.19.0 && \
 RUN echo "=== Chakra Tools Verification ===" && \
     chakra_trace_link --help > /dev/null 2>&1 && echo "✓ chakra_trace_link OK" || echo "✗ chakra_trace_link MISSING" && \
     chakra_converter --help > /dev/null 2>&1 && echo "✓ chakra_converter OK" || echo "✗ chakra_converter MISSING" && \
-    python -c "from chakra.et_converter.pytorch import PyTorchConverter; print('✓ chakra.et_converter.pytorch import OK')" || echo "✗ Python API import MISSING"
+    python -c "from chakra.src.converter.pytorch_converter import PyTorchConverter; print('✓ chakra.src.converter.pytorch_converter import OK')" || echo "✗ Python API import MISSING"
 
 # PyTorch 관련 추가 패키지 설치
 RUN pip install \
