@@ -37,14 +37,15 @@ RUN cd /tmp && \
     pip install -e . && \
     cd / && rm -rf /tmp/HolisticTraceAnalysis
 
-# 3. Chakra 설치 (GitHub에서 직접 설치)
+# 3. Chakra 설치 (GitHub에서 특정 버전 설치)
 RUN pip install protobuf>=3.19.0 && \
-    pip install git+https://github.com/mlcommons/chakra.git
+    pip install https://github.com/mlcommons/chakra/archive/refs/heads/main.zip
 
 # Chakra 설치 확인
 RUN echo "=== Chakra Tools Verification ===" && \
     chakra_trace_link --help > /dev/null 2>&1 && echo "✓ chakra_trace_link OK" || echo "✗ chakra_trace_link MISSING" && \
-    chakra_converter --help > /dev/null 2>&1 && echo "✓ chakra_converter OK" || echo "✗ chakra_converter MISSING"
+    chakra_converter --help > /dev/null 2>&1 && echo "✓ chakra_converter OK" || echo "✗ chakra_converter MISSING" && \
+    python -c "from chakra.et_converter.pytorch import PyTorchConverter; print('✓ chakra.et_converter.pytorch import OK')" || echo "✗ Python API import MISSING"
 
 # PyTorch 관련 추가 패키지 설치
 RUN pip install \
