@@ -76,6 +76,7 @@ class ChakraTracer:
         self.et_observer = ExecutionTraceObserver()
         self.et_observer.register_callback(str(self.host_trace_path))
         self.et_started = False  # Track if ET observer has been started
+        self.device_trace_path = None  # Will be set in _trace_handler
 
         # 2. PyTorch Profiler 설정 (Kineto device trace 생성)
         activities = [
@@ -181,18 +182,15 @@ class ChakraTracer:
         print(f"[ChakraTracer] Processing profiler trace...")
         print(f"{'='*60}")
 
-        # 1. Stop host trace collection (if still running)
-        if self.et_observer is not None and self.et_started:
-            self.et_observer.stop()
-            self.et_started = False
-            print(f"[ChakraTracer] ✓ Host trace collection stopped")
+        # Note: DO NOT stop et_observer here - let __exit__ handle it
+        # Stopping here causes duplicate JSON objects in the file
 
-        # 2. Kineto device trace (JSON) 저장
+        # 1. Kineto device trace (JSON) 저장
         device_trace_path = self.output_dir / f"{self.trace_name}_device.json"
         prof.export_chrome_trace(str(device_trace_path))
         print(f"[ChakraTracer] ✓ Device trace saved: {device_trace_path}")
 
-        # 3. Stacks 분석 저장
+        # 2. Stacks 분석 저장
         stacks_path = self.output_dir / f"{self.trace_name}_stacks.txt"
         with open(stacks_path, "w") as f:
             f.write(prof.key_averages(group_by_stack_n=5).table(
@@ -200,22 +198,8 @@ class ChakraTracer:
             ))
         print(f"[ChakraTracer] ✓ Stack trace saved: {stacks_path}")
 
-        # 4. Link traces and convert to Chakra ET
-        if self.convert_to_et:
-            print(f"\n[ChakraTracer] Linking and converting to Chakra ET format...")
-            success = self._link_and_convert_traces(device_trace_path)
-            if success:
-                print(f"\n{'='*60}")
-                print(f"[ChakraTracer] ✓ Trace capture complete!")
-                print(f"{'='*60}\n")
-            else:
-                print(f"\n{'='*60}")
-                print(f"[ChakraTracer] ⚠ Traces saved, manual conversion needed")
-                print(f"{'='*60}\n")
-        else:
-            print(f"\n[ChakraTracer] To convert manually:")
-            print(f"  1. Link traces: chakra_trace_link --rank {self.rank} --chakra-host-trace {self.host_trace_path} --chakra-device-trace {device_trace_path} --output-file merged.json")
-            print(f"  2. Convert: chakra_converter PyTorch --input merged.json --output output_trace\n")
+        # Note: Trace linking will be done in __exit__ after et_observer is properly stopped
+        self.device_trace_path = device_trace_path  # Save for later use
     
     def __enter__(self):
         """Context manager 진입"""
@@ -231,6 +215,7 @@ class ChakraTracer:
         """Context manager 종료"""
         if self.profiler is not None:
             self.profiler.__exit__(exc_type, exc_val, exc_tb)
+
         # Stop and unregister ET observer
         if self.et_observer is not None:
             if self.et_started:
@@ -238,6 +223,22 @@ class ChakraTracer:
                 self.et_started = False
             self.et_observer.unregister_callback()
             print(f"[ChakraTracer] ✓ Host trace saved: {self.host_trace_path}")
+
+        # Now that both traces are complete, link and convert them
+        if self.convert_to_et and self.device_trace_path is not None:
+            print(f"\n[ChakraTracer] Linking and converting to Chakra ET format...")
+            success = self._link_and_convert_traces(self.device_trace_path)
+            if success:
+                print(f"\n{'='*60}")
+                print(f"[ChakraTracer] ✓ Trace capture complete!")
+                print(f"{'='*60}\n")
+            else:
+                print(f"\n{'='*60}")
+                print(f"[ChakraTracer] ⚠ Traces saved, manual conversion needed")
+                print(f"  Manual conversion:")
+                print(f"  1. chakra_trace_link --rank {self.rank} --chakra-host-trace {self.host_trace_path} --chakra-device-trace {self.device_trace_path} --output-file merged.json")
+                print(f"  2. chakra_converter PyTorch --input merged.json --output output_trace")
+                print(f"{'='*60}\n")
 
     def step(self):
         """Profiling step (각 iteration마다 호출)"""
