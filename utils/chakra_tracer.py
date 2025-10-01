@@ -2,8 +2,10 @@
 
 Chakra Workflow:
 1. PyTorch Profiler -> kineto trace (Chrome JSON)
-2. chakra_trace_link -> merge host + device traces
-3. chakra_converter -> convert to Chakra ET (protobuf)
+2. chakra_converter -> convert to Chakra ET (protobuf)
+
+Note: PyTorch Profiler's Kineto trace already includes both host and device events,
+so we skip chakra_trace_link and directly use chakra_converter.
 """
 
 import os
@@ -19,10 +21,10 @@ class ChakraTracer:
     Chakra Execution Trace 캡처를 위한 래퍼 클래스.
     
     PyTorch Profiler를 사용하여 Kineto trace를 생성하고,
-    chakra_trace_link + chakra_converter를 통해 ET 파일로 변환합니다.
+    chakra_converter를 통해 ET 파일로 변환합니다.
     
     Workflow:
-        PyTorch trace -> chakra_trace_link -> chakra_converter -> .et file
+        PyTorch Profiler -> Kineto trace -> chakra_converter -> .et file
     """
     
     def __init__(
@@ -95,60 +97,26 @@ class ChakraTracer:
         Kineto trace를 Chakra ET 파일로 변환
         
         Chakra 워크플로우:
-        1. chakra_trace_link: host + device trace merge
-        2. chakra_converter: merged trace -> .et (protobuf)
+        PyTorch Kineto trace -> chakra_converter -> .et (protobuf)
+        
+        Note: PyTorch Profiler의 Kineto trace는 이미 host+device 정보를 포함하므로
+        chakra_trace_link 단계를 건너뛰고 바로 chakra_converter를 사용합니다.
         """
         # 파일 경로 설정
         base_name = kineto_trace_path.stem  # _kineto.json 제외
         if base_name.endswith("_kineto"):
             base_name = base_name[:-7]  # "_kineto" 제거
         
-        # Chakra host trace (kineto JSON을 host trace로 사용)
-        host_trace = kineto_trace_path
-        
-        # Device trace는 동일 파일 사용 (PyTorch profiler는 host+device를 함께 생성)
-        device_trace = kineto_trace_path
-        
-        # Merged trace 경로
-        merged_trace = self.output_dir / f"{base_name}_chakra_host_device.json"
-        
         # ET 파일 경로
         et_path = self.output_dir / f"{base_name}.et"
         
         try:
-            # Step 1: chakra_trace_link로 host + device merge
-            print(f"[ChakraTracer] Step 1: Merging host + device traces...")
-            link_result = subprocess.run(
-                [
-                    "chakra_trace_link",
-                    "--chakra-host-trace", str(host_trace),
-                    "--chakra-device-trace", str(device_trace),
-                    "--rank", str(self.rank),
-                    "--output-file", str(merged_trace)
-                ],
-                capture_output=True,
-                text=True
-            )
-            
-            if link_result.returncode != 0:
-                print(f"[ChakraTracer] Warning: chakra_trace_link failed:")
-                print(f"  {link_result.stderr}")
-                print(f"\n[ChakraTracer] Manual conversion command:")
-                print(f"  chakra_trace_link \\")
-                print(f"    --chakra-host-trace {host_trace} \\")
-                print(f"    --chakra-device-trace {device_trace} \\")
-                print(f"    --rank {self.rank} \\")
-                print(f"    --output-file {merged_trace}")
-                return False
-            
-            print(f"[ChakraTracer] ✓ Merged trace: {merged_trace}")
-            
-            # Step 2: chakra_converter로 .et 변환
-            print(f"[ChakraTracer] Step 2: Converting to Chakra ET format...")
+            # chakra_converter로 Kineto JSON을 바로 .et 변환
+            print(f"[ChakraTracer] Converting Kineto trace to Chakra ET format...")
             converter_result = subprocess.run(
                 [
                     "chakra_converter", "PyTorch",
-                    "--input", str(merged_trace),
+                    "--input", str(kineto_trace_path),
                     "--output", str(et_path.with_suffix(""))  # .et는 자동 추가됨
                 ],
                 capture_output=True,
@@ -160,7 +128,7 @@ class ChakraTracer:
                 print(f"  {converter_result.stderr}")
                 print(f"\n[ChakraTracer] Manual conversion command:")
                 print(f"  chakra_converter PyTorch \\")
-                print(f"    --input {merged_trace} \\")
+                print(f"    --input {kineto_trace_path} \\")
                 print(f"    --output {et_path.with_suffix('')}")
                 return False
             
@@ -169,14 +137,11 @@ class ChakraTracer:
                     
         except FileNotFoundError as e:
             print(f"[ChakraTracer] Error: Chakra tools not found!")
-            print(f"  Make sure PARAM and HolisticTraceAnalysis are installed.")
+            print(f"  Make sure Chakra is properly installed.")
             print(f"  See Dockerfile for installation instructions.")
-            print(f"\n[ChakraTracer] Manual conversion steps:")
-            print(f"  1. chakra_trace_link --chakra-host-trace {host_trace} \\")
-            print(f"       --chakra-device-trace {device_trace} --rank {self.rank} \\")
-            print(f"       --output-file {merged_trace}")
-            print(f"  2. chakra_converter PyTorch --input {merged_trace} \\")
-            print(f"       --output {et_path.with_suffix('')}")
+            print(f"\n[ChakraTracer] Manual conversion command:")
+            print(f"  chakra_converter PyTorch --input {kineto_trace_path} \\")
+            print(f"    --output {et_path.with_suffix('')}")
             return False
         except Exception as e:
             print(f"[ChakraTracer] Warning: Failed to convert to Chakra ET: {e}")
@@ -214,17 +179,11 @@ class ChakraTracer:
                 print(f"[ChakraTracer] ⚠ Kineto trace saved, manual conversion needed")
                 print(f"{'='*60}\n")
         else:
-            merged_path = self.output_dir / f"{self.trace_name}_chakra_host_device.json"
             et_path = self.output_dir / f"{self.trace_name}.et"
-            print(f"\n[ChakraTracer] Manual conversion steps:")
-            print(f"  1. chakra_trace_link \\")
-            print(f"       --chakra-host-trace {kineto_path} \\")
-            print(f"       --chakra-device-trace {kineto_path} \\")
-            print(f"       --rank {self.rank} \\")
-            print(f"       --output-file {merged_path}")
-            print(f"  2. chakra_converter PyTorch \\")
-            print(f"       --input {merged_path} \\")
-            print(f"       --output {et_path.with_suffix('')}\n")
+            print(f"\n[ChakraTracer] Manual conversion command:")
+            print(f"  chakra_converter PyTorch \\")
+            print(f"    --input {kineto_path} \\")
+            print(f"    --output {et_path.with_suffix('')}\n")
     
     def __enter__(self):
         """Context manager 진입"""
