@@ -75,6 +75,7 @@ class ChakraTracer:
         self.host_trace_path = self.output_dir / f"{self.trace_name}_host.json"
         self.et_observer = ExecutionTraceObserver()
         self.et_observer.register_callback(str(self.host_trace_path))
+        self.et_started = False  # Track if ET observer has been started
 
         # 2. PyTorch Profiler 설정 (Kineto device trace 생성)
         activities = [
@@ -180,11 +181,11 @@ class ChakraTracer:
         print(f"[ChakraTracer] Processing profiler trace...")
         print(f"{'='*60}")
 
-        # 1. Stop host trace collection
-        if self.et_observer is not None:
+        # 1. Stop host trace collection (if still running)
+        if self.et_observer is not None and self.et_started:
             self.et_observer.stop()
-            self.et_observer.unregister_callback()
-            print(f"[ChakraTracer] ✓ Host trace saved: {self.host_trace_path}")
+            self.et_started = False
+            print(f"[ChakraTracer] ✓ Host trace collection stopped")
 
         # 2. Kineto device trace (JSON) 저장
         device_trace_path = self.output_dir / f"{self.trace_name}_device.json"
@@ -218,8 +219,10 @@ class ChakraTracer:
     
     def __enter__(self):
         """Context manager 진입"""
-        if self.et_observer is not None:
+        # Start ExecutionTraceObserver before profiler
+        if self.et_observer is not None and not self.et_started:
             self.et_observer.start()
+            self.et_started = True
         if self.profiler is not None:
             self.profiler.__enter__()
         return self
@@ -228,7 +231,13 @@ class ChakraTracer:
         """Context manager 종료"""
         if self.profiler is not None:
             self.profiler.__exit__(exc_type, exc_val, exc_tb)
-        # Note: et_observer.stop() is called in _trace_handler
+        # Stop and unregister ET observer
+        if self.et_observer is not None:
+            if self.et_started:
+                self.et_observer.stop()
+                self.et_started = False
+            self.et_observer.unregister_callback()
+            print(f"[ChakraTracer] ✓ Host trace saved: {self.host_trace_path}")
 
     def step(self):
         """Profiling step (각 iteration마다 호출)"""
@@ -237,8 +246,9 @@ class ChakraTracer:
 
     def start(self):
         """Profiling 시작"""
-        if self.et_observer is not None:
+        if self.et_observer is not None and not self.et_started:
             self.et_observer.start()
+            self.et_started = True
         if self.profiler is not None:
             self.profiler.start()
 
@@ -246,7 +256,9 @@ class ChakraTracer:
         """Profiling 종료"""
         if self.profiler is not None:
             self.profiler.stop()
-        # Note: et_observer.stop() is called in _trace_handler
+        if self.et_observer is not None and self.et_started:
+            self.et_observer.stop()
+            self.et_started = False
 
 
 def profile_training(
