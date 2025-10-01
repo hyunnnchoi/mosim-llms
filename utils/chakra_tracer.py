@@ -9,7 +9,6 @@ so we skip chakra_trace_link and directly use chakra_converter.
 """
 
 import os
-import subprocess
 import torch
 import torch.profiler as profiler
 from typing import Optional, Callable
@@ -97,10 +96,10 @@ class ChakraTracer:
         Kineto trace를 Chakra ET 파일로 변환
         
         Chakra 워크플로우:
-        PyTorch Kineto trace -> chakra_converter -> .et (protobuf)
+        PyTorch Kineto trace -> PyTorchConverter -> .et (protobuf)
         
-        Note: PyTorch Profiler의 Kineto trace는 이미 host+device 정보를 포함하므로
-        chakra_trace_link 단계를 건너뛰고 바로 chakra_converter를 사용합니다.
+        Note: chakra.et_converter.pytorch.PyTorchConverter API를 사용하여
+        Kineto JSON을 직접 Chakra ET 형식으로 변환합니다.
         """
         # 파일 경로 설정
         base_name = kineto_trace_path.stem  # _kineto.json 제외
@@ -111,40 +110,31 @@ class ChakraTracer:
         et_path = self.output_dir / f"{base_name}.et"
         
         try:
-            # chakra_converter로 Kineto JSON을 바로 .et 변환
+            # Chakra PyTorchConverter를 사용하여 변환
             print(f"[ChakraTracer] Converting Kineto trace to Chakra ET format...")
-            converter_result = subprocess.run(
-                [
-                    "chakra_converter", "PyTorch",
-                    "--input", str(kineto_trace_path),
-                    "--output", str(et_path.with_suffix(""))  # .et는 자동 추가됨
-                ],
-                capture_output=True,
-                text=True
-            )
             
-            if converter_result.returncode != 0:
-                print(f"[ChakraTracer] Warning: chakra_converter failed:")
-                print(f"  {converter_result.stderr}")
-                print(f"\n[ChakraTracer] Manual conversion command:")
-                print(f"  chakra_converter PyTorch \\")
-                print(f"    --input {kineto_trace_path} \\")
-                print(f"    --output {et_path.with_suffix('')}")
-                return False
+            from chakra.et_converter.pytorch import PyTorchConverter
+            
+            converter = PyTorchConverter()
+            converter.convert(
+                input_filename=str(kineto_trace_path),
+                output_filename=str(et_path)
+            )
             
             print(f"[ChakraTracer] ✓ Chakra ET file saved to {et_path}")
             return True
                     
-        except FileNotFoundError as e:
-            print(f"[ChakraTracer] Error: Chakra tools not found!")
+        except ImportError as e:
+            print(f"[ChakraTracer] Error: Chakra converter not found: {e}")
             print(f"  Make sure Chakra is properly installed.")
-            print(f"  See Dockerfile for installation instructions.")
-            print(f"\n[ChakraTracer] Manual conversion command:")
-            print(f"  chakra_converter PyTorch --input {kineto_trace_path} \\")
-            print(f"    --output {et_path.with_suffix('')}")
+            print(f"  pip install git+https://github.com/mlcommons/chakra.git")
+            print(f"\n[ChakraTracer] Alternative: use convert_to_et.py script")
+            print(f"  python convert_to_et.py")
             return False
         except Exception as e:
             print(f"[ChakraTracer] Warning: Failed to convert to Chakra ET: {e}")
+            print(f"\n[ChakraTracer] Alternative: use convert_to_et.py script")
+            print(f"  python convert_to_et.py")
             return False
     
     def _trace_handler(self, prof):
@@ -179,11 +169,8 @@ class ChakraTracer:
                 print(f"[ChakraTracer] ⚠ Kineto trace saved, manual conversion needed")
                 print(f"{'='*60}\n")
         else:
-            et_path = self.output_dir / f"{self.trace_name}.et"
-            print(f"\n[ChakraTracer] Manual conversion command:")
-            print(f"  chakra_converter PyTorch \\")
-            print(f"    --input {kineto_path} \\")
-            print(f"    --output {et_path.with_suffix('')}\n")
+            print(f"\n[ChakraTracer] To convert manually, use:")
+            print(f"  python convert_to_et.py\n")
     
     def __enter__(self):
         """Context manager 진입"""
