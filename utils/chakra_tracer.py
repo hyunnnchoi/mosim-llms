@@ -99,6 +99,7 @@ class ChakraTracer:
             profile_memory=profile_memory,
             with_stack=with_stack,
             with_flops=with_flops,
+            execution_trace_observer=self.et_observer,  # Link ET observer to profiler
         )
     
     def _link_and_convert_traces(self, device_trace_path: Path):
