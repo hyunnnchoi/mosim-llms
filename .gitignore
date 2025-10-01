@@ -42,8 +42,7 @@ datasets/
 *.tar.gz
 *.zip
 
-# Chakra traces
-*.et
+# Chakra traces (keep outputs/*.et)
 traces/
 
 # Docker
@@ -52,6 +51,15 @@ traces/
 # Environment
 .env
 *.log
+
+# Outputs directory - keep only essential trace files
+outputs/*_merged.json
+outputs/*.backup
+outputs/*_stacks.txt
+outputs/*_resources/
+
+# Virtual environment
+chakra-venv/
 
 # Keep outputs directory structure
 !outputs/.gitkeep
