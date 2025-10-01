@@ -35,7 +35,7 @@ class ChakraTracer:
         enabled: bool = True,
         wait_steps: int = 2,
         warmup_steps: int = 2,
-        active_steps: int = 6,
+        active_steps: int = 1,  # MUST be 1 for ExecutionTraceObserver
         record_shapes: bool = True,
         profile_memory: bool = True,
         with_stack: bool = True,
