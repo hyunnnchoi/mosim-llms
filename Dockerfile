@@ -19,10 +19,10 @@ WORKDIR /workspace
 RUN pip install --upgrade pip setuptools wheel
 
 # Chakra 및 의존성 설치
-# 1. PARAM 설치 (Chakra 의존성)
+# 1. PARAM 설치 (Chakra 의존성 - et_replay 필요)
 RUN cd /tmp && \
     git clone https://github.com/facebookresearch/param.git && \
-    cd param/train/compute/python && \
+    cd param/et_replay && \
     git checkout 7b19f586dd8b267333114992833a0d7e0d601630 && \
     pip install . && \
     cd / && rm -rf /tmp/param

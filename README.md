@@ -189,9 +189,9 @@ Dockerfile에 포함된 의존성:
 
 수동 설치 (서버에서):
 ```bash
-# PARAM 설치
+# PARAM 설치 (et_replay)
 git clone https://github.com/facebookresearch/param.git
-cd param/train/compute/python
+cd param/et_replay
 git checkout 7b19f586dd8b267333114992833a0d7e0d601630
 pip install .
 
