@@ -32,23 +32,45 @@ mosim-llms/
 │   ├── data_utils.py          # SQuAD 데이터 로딩
 │   └── chakra_tracer.py       # Chakra trace 캡처
 │
-├── run_gpt2.sh                 # GPT-2 실행 스크립트
-├── run_bert.sh                 # BERT 실행 스크립트
-└── run_all_experiments.sh      # 전체 실험 자동 실행
+├── run_gpt2_quick.sh           # GPT-2 프로파일링 (1/2/4 GPU)
+├── run_bert_quick.sh           # BERT 프로파일링 (1/2/4 GPU)
+├── run_all_profiling.sh        # 전체 프로파일링 자동 실행
+│
+├── Chakra ET 변환 도구 (로컬용)
+├── setup_and_convert.sh        # 자동 설치 + 변환
+├── fix_host_traces.py          # Host trace JSON 수정
+├── convert_to_et.py            # Chakra ET 변환
+├── convert_remaining.py        # 실패한 파일 재변환
+├── install_chakra_tools.sh     # Chakra 도구 수동 설치
+│
+├── 문서
+├── README.md                   # 프로젝트 가이드
+├── USAGE_GUIDE.md              # 상세 사용법
+├── PROJECT_SUMMARY.md          # 프로젝트 요약
+├── CHAKRA_SETUP.md             # Chakra 설정 가이드
+└── CONVERSION_SUMMARY.md       # 변환 결과 요약
 ```
 
-## 빠른 시작
+## 🚀 빠른 시작
 
-### 1. Docker 이미지 빌드
+### A. 서버에서 프로파일링 실행
+
+서버(GPU 환경)에서 PyTorch 프로파일링을 수행하여 trace 파일을 생성합니다.
+
+#### 1. 코드 업데이트 및 Docker 이미지 빌드
 
 ```bash
-./build.sh
+# 최신 코드 가져오기
+sudo git pull
+
+# Docker 이미지 빌드
+sudo ./build.sh
 ```
 
-### 2. 컨테이너 실행
+#### 2. Docker 컨테이너 실행
 
 ```bash
-# GPU 사용
+# GPU 컨테이너 실행
 ./run.sh gpu
 
 # 또는 docker-compose 사용
@@ -56,32 +78,96 @@ docker-compose up -d
 docker-compose exec mosim-llms bash
 ```
 
-### 3. 학습 실행
-
-컨테이너 내부에서:
+#### 3. 프로파일링 실행 (컨테이너 내부)
 
 ```bash
-# GPT-2: 1 GPU
-./run_gpt2.sh 1
+# 모든 프로파일링 자동 실행 (GPT-2, BERT × 1/2/4 GPU)
+./run_all_profiling.sh
 
-# GPT-2: 2 GPUs
-./run_gpt2.sh 2
-
-# GPT-2: 8 GPUs
-./run_gpt2.sh 8
-
-# BERT: 1 GPU
-./run_bert.sh 1
-
-# BERT: 2 GPUs
-./run_bert.sh 2
-
-# BERT: 8 GPUs
-./run_bert.sh 8
-
-# 모든 실험 자동 실행
-./run_all_experiments.sh
+# 또는 개별 실행
+./run_gpt2_quick.sh    # GPT-2: 1/2/4 GPU
+./run_bert_quick.sh    # BERT: 1/2/4 GPU
 ```
+
+**생성되는 파일** (outputs 폴더):
+```
+outputs/
+├── bert_1gpu_quick_trace_host.json      # Host trace
+├── bert_1gpu_quick_trace_device.json    # Device trace
+├── bert_1gpu_quick_trace_stacks.txt     # 분석용
+├── bert_2gpu_quick_trace_*.json
+├── bert_4gpu_quick_trace_*.json
+├── gpt2_1gpu_quick_trace_*.json
+├── gpt2_2gpu_quick_trace_*.json
+└── gpt2_4gpu_quick_trace_*.json
+```
+
+### B. 로컬(맥북)에서 Chakra ET 변환
+
+서버에서 생성된 trace 파일을 다운로드하여 Chakra ET 형식으로 변환합니다.
+
+#### 1. 서버에서 trace 파일 다운로드
+
+```bash
+# 로컬 맥북에서 실행
+scp -r your-server:/path/to/mosim-llms/outputs ./
+```
+
+#### 2. Chakra 도구 자동 설치 및 변환
+
+```bash
+# 한 번에 설치 + 변환 (권장)
+./setup_and_convert.sh
+```
+
+이 스크립트는 자동으로:
+- ✅ Python 가상 환경 생성 (`chakra-venv/`)
+- ✅ Chakra 도구 설치 (PARAM, HolisticTraceAnalysis, Chakra)
+- ✅ Host trace JSON 수정 (중복 객체 제거)
+- ✅ Host + Device trace 병합
+- ✅ Chakra ET 파일 생성
+
+#### 3. 변환 결과 확인
+
+```bash
+# ET 파일 확인
+ls -lh outputs/*.et
+
+# 예상 출력:
+# bert_1gpu_quick_trace.et      (10 MB)
+# bert_2gpu_quick_trace.et      (12 MB)
+# bert_4gpu_quick_trace.et      (12 MB)
+# gpt2_1gpu_quick_trace.et      (8.6 MB)
+# gpt2_2gpu_quick_trace.et      (9.6 MB)
+# gpt2_4gpu_quick_trace.et      (9.6 MB)
+```
+
+#### 📝 수동 변환 (문제 발생 시)
+
+자동 변환이 실패한 경우:
+
+```bash
+# 1. 가상 환경 활성화
+source chakra-venv/bin/activate
+
+# 2. Host trace 수정 (중복 JSON 객체 제거)
+python fix_host_traces.py
+
+# 3. ET 변환
+python convert_to_et.py
+
+# 4. 가상 환경 비활성화
+deactivate
+```
+
+**변환 과정:**
+1. `fix_host_traces.py` - 손상된 host trace JSON 수정
+2. `chakra_trace_link` - host + device trace 병합
+3. `chakra_converter` - Chakra ET 형식으로 변환
+
+**문제 해결:**
+- 자세한 가이드: [CHAKRA_SETUP.md](CHAKRA_SETUP.md)
+- 변환 결과: [CONVERSION_SUMMARY.md](CONVERSION_SUMMARY.md)
 
 ## 상세 사용법
 
@@ -142,88 +228,93 @@ torchrun --nproc_per_node=8 bert/train.py \
 - `torch.nn.parallel.DistributedDataParallel` 사용
 - `torchrun`을 통한 멀티프로세스 실행
 
-## Chakra Execution Trace
+## 📊 Chakra Execution Trace
 
-### Trace 캡처 워크플로우
+### Trace 워크플로우
 
-학습 중 자동으로 PyTorch trace를 생성하고 Chakra ET 파일로 변환합니다:
+**서버 → 로컬 2단계 프로세스:**
 
-**변환 파이프라인:**
-1. **PyTorch Profiler** → Kineto trace JSON (Chrome trace)
-2. **chakra_trace_link** → Host + Device merge
-3. **chakra_converter** → Chakra ET (protobuf)
+#### 1단계: 서버에서 PyTorch Profiling
+```
+PyTorch Profiler
+├── ExecutionTraceObserver → *_host.json    (CPU operations)
+└── Kineto Profiler → *_device.json         (GPU operations)
+```
 
-- **중간 형식**: 
-  - `*_kineto.json`: PyTorch Kineto trace (Chrome JSON)
-  - `*_chakra_host_device.json`: Merged trace (Chakra 입력)
-- **최종 형식**: Chakra Execution Trace (`.et`)
-- **저장 위치**: `./outputs/`
-- **캡처 내용**:
-  - Compute operations (forward, backward)
-  - Memory operations (allocation, transfer)
-  - Communication operations (all-reduce for DDP)
-  - Dependency graph
-  - Timing information
+#### 2단계: 로컬에서 Chakra ET 변환
+```
+Local Conversion
+├── fix_host_traces.py → host.json 수정
+├── chakra_trace_link → host + device 병합
+└── chakra_converter → .et 파일 생성
+```
 
-### Trace 파일
+### 생성되는 파일
 
+#### 서버 (PyTorch Profiling)
 ```
 outputs/
-├── gpt2_1gpu_quick_trace_kineto.json           # Step 1: Kineto trace
-├── gpt2_1gpu_quick_trace_chakra_host_device.json  # Step 2: Merged
-├── gpt2_1gpu_quick_trace.et                    # Step 3: Chakra ET ✓
-├── gpt2_1gpu_quick_trace_stacks.txt            # 분석용
-├── gpt2_2gpu_quick_trace.et                    # Chakra ET ✓
-├── gpt2_4gpu_quick_trace.et                    # Chakra ET ✓
-├── bert_1gpu_quick_trace.et                    # Chakra ET ✓
-├── bert_2gpu_quick_trace.et                    # Chakra ET ✓
-└── bert_4gpu_quick_trace.et                    # Chakra ET ✓
+├── *_host.json        # ExecutionTraceObserver 출력
+├── *_device.json      # Kineto Profiler 출력
+└── *_stacks.txt       # Stack trace 분석
 ```
 
-### Chakra 의존성 설치
+#### 로컬 (Chakra 변환 후)
+```
+outputs/
+├── *_host.json        # 원본 (수정됨)
+├── *_device.json      # 원본
+├── *_merged.json      # 병합된 trace (중간 파일)
+└── *.et              # Chakra ET (최종 출력) ✓
+```
 
-Dockerfile에 포함된 의존성:
-- **PARAM** (Chakra 필수 의존성)
-- **HolisticTraceAnalysis** (chakra_trace_link 제공)
-- **Chakra** (변환 도구)
+### 최종 ET 파일
 
-수동 설치 (서버에서):
+| 모델 | GPU | 파일명 | 크기 |
+|------|-----|--------|------|
+| BERT | 1 | `bert_1gpu_quick_trace.et` | 10 MB |
+| BERT | 2 | `bert_2gpu_quick_trace.et` | 12 MB |
+| BERT | 4 | `bert_4gpu_quick_trace.et` | 12 MB |
+| GPT-2 | 1 | `gpt2_1gpu_quick_trace.et` | 8.6 MB |
+| GPT-2 | 2 | `gpt2_2gpu_quick_trace.et` | 9.6 MB |
+| GPT-2 | 4 | `gpt2_4gpu_quick_trace.et` | 9.6 MB |
+
+**캡처 내용:**
+- ✅ Compute operations (forward, backward)
+- ✅ Memory operations (allocation, transfer)
+- ✅ Communication operations (all-reduce, broadcast for DDP)
+- ✅ Dependency graph
+- ✅ Timing information
+
+### Chakra 도구 설치
+
+#### 서버 (Docker)
+Docker 이미지에 **이미 포함**되어 있습니다:
+- ✅ PARAM (et_replay)
+- ✅ HolisticTraceAnalysis (chakra_trace_link)
+- ✅ Chakra (chakra_converter)
+
+별도 설치 불필요!
+
+#### 로컬 (맥북)
+`setup_and_convert.sh` 스크립트가 **자동 설치**합니다:
+
 ```bash
-# PARAM 설치 (et_replay)
-git clone https://github.com/facebookresearch/param.git
-cd param/et_replay
-git checkout 7b19f586dd8b267333114992833a0d7e0d601630
-pip install .
+./setup_and_convert.sh
+# 자동으로 설치:
+# - Python 가상 환경 (chakra-venv/)
+# - PARAM, HolisticTraceAnalysis, Chakra
+```
 
-# HolisticTraceAnalysis 설치
-git clone https://github.com/facebookresearch/HolisticTraceAnalysis.git
-cd HolisticTraceAnalysis
-git checkout d731cc2e2249976c97129d409a83bd53d93051f6
-git submodule update --init
-pip install -r requirements.txt
-pip install -e .
-
-# Chakra 재설치
+**수동 설치**가 필요한 경우:
+```bash
+./install_chakra_tools.sh
+# 또는
+source chakra-venv/bin/activate
 pip install git+https://github.com/mlcommons/chakra.git
 ```
 
-### Chakra ET 변환 (수동)
-
-자동 변환이 실패하는 경우:
-
-```bash
-# Step 1: chakra_trace_link로 host + device merge
-chakra_trace_link \
-    --chakra-host-trace outputs/gpt2_1gpu_quick_trace_kineto.json \
-    --chakra-device-trace outputs/gpt2_1gpu_quick_trace_kineto.json \
-    --rank 0 \
-    --output-file outputs/gpt2_1gpu_quick_trace_chakra_host_device.json
-
-# Step 2: chakra_converter로 .et 변환
-chakra_converter PyTorch \
-    --input outputs/gpt2_1gpu_quick_trace_chakra_host_device.json \
-    --output outputs/gpt2_1gpu_quick_trace
-```
+자세한 설치 가이드: [CHAKRA_SETUP.md](CHAKRA_SETUP.md)
 
 ## 데이터셋
 
