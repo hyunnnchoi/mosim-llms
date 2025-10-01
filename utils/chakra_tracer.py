@@ -1,16 +1,15 @@
 """Chakra execution trace capture utilities.
 
 Chakra Workflow:
-1. PyTorch Profiler -> kineto trace (Chrome JSON)
-2. chakra_converter -> convert to Chakra ET (protobuf)
-
-Note: PyTorch Profiler's Kineto trace already includes both host and device events,
-so we skip chakra_trace_link and directly use chakra_converter.
+1. Collect PyTorch host trace (ExecutionTraceObserver) and device trace (Kineto)
+2. chakra_trace_link -> merge host + device traces
+3. chakra_converter -> convert to Chakra ET (protobuf)
 """
 
 import os
 import torch
 import torch.profiler as profiler
+from torch.profiler import ExecutionTraceObserver
 from typing import Optional, Callable
 from pathlib import Path
 
@@ -18,14 +17,17 @@ from pathlib import Path
 class ChakraTracer:
     """
     Chakra Execution Trace 캡처를 위한 래퍼 클래스.
-    
-    PyTorch Profiler를 사용하여 Kineto trace를 생성하고,
-    chakra_converter를 통해 ET 파일로 변환합니다.
-    
+
+    PyTorch ExecutionTraceObserver와 Profiler를 사용하여
+    host trace와 device trace를 수집합니다.
+
     Workflow:
-        PyTorch Profiler -> Kineto trace -> chakra_converter -> .et file
+        1. ExecutionTraceObserver -> PyTorch host trace
+        2. PyTorch Profiler -> Kineto device trace
+        3. chakra_trace_link -> merge traces
+        4. chakra_converter -> .et file
     """
-    
+
     def __init__(
         self,
         output_dir: str = "./outputs",
@@ -58,24 +60,30 @@ class ChakraTracer:
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.trace_name = trace_name
         self.enabled = enabled
         self.convert_to_et = convert_to_et
         self.rank = rank
-        
+
         if not self.enabled:
             self.profiler = None
+            self.et_observer = None
             return
-        
-        # PyTorch Profiler 설정 (Kineto trace 생성)
+
+        # 1. ExecutionTraceObserver for host trace
+        self.host_trace_path = self.output_dir / f"{self.trace_name}_host.json"
+        self.et_observer = ExecutionTraceObserver()
+        self.et_observer.register_callback(str(self.host_trace_path))
+
+        # 2. PyTorch Profiler 설정 (Kineto device trace 생성)
         activities = [
             profiler.ProfilerActivity.CPU,
         ]
-        
+
         if torch.cuda.is_available():
             activities.append(profiler.ProfilerActivity.CUDA)
-        
+
         self.profiler = profiler.profile(
             activities=activities,
             schedule=profiler.schedule(
@@ -91,63 +99,79 @@ class ChakraTracer:
             with_flops=with_flops,
         )
     
-    def _convert_to_chakra_et(self, kineto_trace_path: Path):
+    def _link_and_convert_traces(self, device_trace_path: Path):
         """
-        Kineto trace를 Chakra ET 파일로 변환
-        
+        Host trace와 device trace를 병합하고 Chakra ET로 변환
+
         Chakra 워크플로우:
-        PyTorch Kineto trace -> chakra_converter CLI -> .et (protobuf)
-        
-        Note: CLI 도구를 사용합니다. Python API는 이미 변환된 Chakra JSON을 입력으로 받지만,
-        CLI는 Kineto JSON을 직접 처리할 수 있습니다.
+        1. chakra_trace_link: merge host + device traces -> merged JSON
+        2. chakra_converter: merged JSON -> .et (protobuf)
         """
         import subprocess
-        
+
         # 파일 경로 설정
-        base_name = kineto_trace_path.stem  # _kineto.json 제외
-        if base_name.endswith("_kineto"):
-            base_name = base_name[:-7]  # "_kineto" 제거
-        
-        # ET 파일 경로 (chakra_converter가 자동으로 .et 추가)
+        base_name = self.trace_name
+        merged_trace_path = self.output_dir / f"{base_name}_merged.json"
         et_path_base = self.output_dir / base_name
         et_path = self.output_dir / f"{base_name}.et"
-        
+
         try:
-            # chakra_converter CLI 도구 사용
-            print(f"[ChakraTracer] Converting Kineto trace to Chakra ET format...")
-            
+            # Step 1: Link host and device traces
+            print(f"[ChakraTracer] Linking host and device traces...")
+            print(f"  Host trace: {self.host_trace_path}")
+            print(f"  Device trace: {device_trace_path}")
+
+            result = subprocess.run(
+                [
+                    "chakra_trace_link",
+                    "--rank", str(self.rank),
+                    "--chakra-host-trace", str(self.host_trace_path),
+                    "--chakra-device-trace", str(device_trace_path),
+                    "--output-file", str(merged_trace_path)
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5분 타임아웃
+            )
+
+            if result.returncode != 0:
+                print(f"[ChakraTracer] Warning: chakra_trace_link failed:")
+                print(f"  {result.stderr}")
+                return False
+
+            print(f"[ChakraTracer] ✓ Traces linked: {merged_trace_path}")
+
+            # Step 2: Convert merged trace to ET format
+            print(f"[ChakraTracer] Converting to Chakra ET format...")
+
             result = subprocess.run(
                 [
                     "chakra_converter", "PyTorch",
-                    "--input", str(kineto_trace_path),
+                    "--input", str(merged_trace_path),
                     "--output", str(et_path_base)  # .et는 자동 추가됨
                 ],
                 capture_output=True,
                 text=True,
                 timeout=300  # 5분 타임아웃
             )
-            
+
             if result.returncode != 0:
                 print(f"[ChakraTracer] Warning: chakra_converter failed:")
                 print(f"  {result.stderr}")
                 return False
-            
+
             print(f"[ChakraTracer] ✓ Chakra ET file saved to {et_path}")
             return True
-                    
-        except FileNotFoundError:
-            print(f"[ChakraTracer] Error: chakra_converter command not found")
+
+        except FileNotFoundError as e:
+            print(f"[ChakraTracer] Error: Command not found: {e}")
             print(f"  Make sure Chakra is properly installed.")
-            print(f"\n[ChakraTracer] Alternative: use convert_to_et.py script")
-            print(f"  python convert_to_et.py")
             return False
         except subprocess.TimeoutExpired:
             print(f"[ChakraTracer] Warning: Conversion timed out (>5 minutes)")
             return False
         except Exception as e:
-            print(f"[ChakraTracer] Warning: Failed to convert to Chakra ET: {e}")
-            print(f"\n[ChakraTracer] Alternative: use convert_to_et.py script")
-            print(f"  python convert_to_et.py")
+            print(f"[ChakraTracer] Warning: Failed to process traces: {e}")
             return False
     
     def _trace_handler(self, prof):
@@ -155,61 +179,74 @@ class ChakraTracer:
         print(f"\n{'='*60}")
         print(f"[ChakraTracer] Processing profiler trace...")
         print(f"{'='*60}")
-        
-        # 1. Kineto trace (JSON) 저장
-        kineto_path = self.output_dir / f"{self.trace_name}_kineto.json"
-        prof.export_chrome_trace(str(kineto_path))
-        print(f"[ChakraTracer] ✓ Kineto trace saved: {kineto_path}")
-        
-        # 2. Stacks 분석 저장
+
+        # 1. Stop host trace collection
+        if self.et_observer is not None:
+            self.et_observer.stop()
+            self.et_observer.unregister_callback()
+            print(f"[ChakraTracer] ✓ Host trace saved: {self.host_trace_path}")
+
+        # 2. Kineto device trace (JSON) 저장
+        device_trace_path = self.output_dir / f"{self.trace_name}_device.json"
+        prof.export_chrome_trace(str(device_trace_path))
+        print(f"[ChakraTracer] ✓ Device trace saved: {device_trace_path}")
+
+        # 3. Stacks 분석 저장
         stacks_path = self.output_dir / f"{self.trace_name}_stacks.txt"
         with open(stacks_path, "w") as f:
             f.write(prof.key_averages(group_by_stack_n=5).table(
                 sort_by="self_cuda_time_total", row_limit=50
             ))
         print(f"[ChakraTracer] ✓ Stack trace saved: {stacks_path}")
-        
-        # 3. Chakra ET 형식으로 변환
+
+        # 4. Link traces and convert to Chakra ET
         if self.convert_to_et:
-            print(f"\n[ChakraTracer] Converting to Chakra ET format...")
-            success = self._convert_to_chakra_et(kineto_path)
+            print(f"\n[ChakraTracer] Linking and converting to Chakra ET format...")
+            success = self._link_and_convert_traces(device_trace_path)
             if success:
                 print(f"\n{'='*60}")
                 print(f"[ChakraTracer] ✓ Trace capture complete!")
                 print(f"{'='*60}\n")
             else:
                 print(f"\n{'='*60}")
-                print(f"[ChakraTracer] ⚠ Kineto trace saved, manual conversion needed")
+                print(f"[ChakraTracer] ⚠ Traces saved, manual conversion needed")
                 print(f"{'='*60}\n")
         else:
-            print(f"\n[ChakraTracer] To convert manually, use:")
-            print(f"  python convert_to_et.py\n")
+            print(f"\n[ChakraTracer] To convert manually:")
+            print(f"  1. Link traces: chakra_trace_link --rank {self.rank} --chakra-host-trace {self.host_trace_path} --chakra-device-trace {device_trace_path} --output-file merged.json")
+            print(f"  2. Convert: chakra_converter PyTorch --input merged.json --output output_trace\n")
     
     def __enter__(self):
         """Context manager 진입"""
+        if self.et_observer is not None:
+            self.et_observer.start()
         if self.profiler is not None:
             self.profiler.__enter__()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager 종료"""
         if self.profiler is not None:
             self.profiler.__exit__(exc_type, exc_val, exc_tb)
-    
+        # Note: et_observer.stop() is called in _trace_handler
+
     def step(self):
         """Profiling step (각 iteration마다 호출)"""
         if self.profiler is not None:
             self.profiler.step()
-    
+
     def start(self):
         """Profiling 시작"""
+        if self.et_observer is not None:
+            self.et_observer.start()
         if self.profiler is not None:
             self.profiler.start()
-    
+
     def stop(self):
         """Profiling 종료"""
         if self.profiler is not None:
             self.profiler.stop()
+        # Note: et_observer.stop() is called in _trace_handler
 
 
 def profile_training(
