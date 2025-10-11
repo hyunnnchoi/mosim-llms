@@ -72,7 +72,7 @@ def train_one_epoch(
         optimizer.step()
         scheduler.step()
         
-        # Chakra profiling step
+        # Chakra profiling step (매 iteration마다!)
         if tracer is not None:
             tracer.step()
         
@@ -87,7 +87,7 @@ def train_one_epoch(
                 print(f"\n✓ Reached max_steps={config.max_steps}, stopping epoch early")
             break
         
-                # Logging
+        # Logging
         if is_main_process() and batch_idx % config.logging_steps == 0:
             pbar.set_postfix({
                 "loss": f"{loss_val:.4f}",
@@ -178,9 +178,11 @@ def train(config: BERTConfig):
         num_training_steps=total_steps
     )
     
-    # Chakra tracer (only on main process)
+    # ============================================
+    # 🔥 핵심 수정: 모든 rank가 trace 저장
+    # ============================================
     tracer = None
-    if config.enable_tracing and is_main_process():
+    if config.enable_tracing:  # is_main_process() 제거!
         tracer = ChakraTracer(
             output_dir=config.trace_output_dir,
             trace_name=config.trace_name,
@@ -188,7 +190,8 @@ def train(config: BERTConfig):
             wait_steps=config.trace_wait_steps,
             warmup_steps=config.trace_warmup_steps,
             active_steps=config.trace_active_steps,
-            rank=rank
+            rank=rank,
+            world_size=world_size  # 추가!
         )
     
     # Training loop
@@ -204,9 +207,12 @@ def train(config: BERTConfig):
         if world_size > 1:
             train_loader.sampler.set_epoch(epoch)
         
+        # ============================================
+        # ✅ 올바른 방식: tracer를 context manager로 사용
+        # ============================================
         # Train
         if tracer is not None:
-            with tracer:
+            with tracer:  # tracer.step()은 train_one_epoch 안에서!
                 train_loss = train_one_epoch(
                     model, train_loader, optimizer, scheduler, epoch, config, tracer
                 )

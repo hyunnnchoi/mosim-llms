@@ -1,21 +1,25 @@
-"""Improved Chakra execution trace capture for ASTRA-sim compatibility."""
+"""
+Multi-GPU Chakra tracer with ASTRA-sim compatible file naming.
+
+Key fixes:
+1. Each GPU generates separate ET file: trace_name.{rank}.et
+2. All ranks save traces, not just rank 0
+3. Proper file naming for ASTRA-sim
+"""
 
 import os
 import torch
 import torch.profiler as profiler
 from torch.profiler import ExecutionTraceObserver
 from pathlib import Path
-import json
+import subprocess
 
 
-class ImprovedChakraTracer:
+class MultiGPUChakraTracer:
     """
-    ASTRA-sim 호환 Chakra Trace 생성을 위한 개선된 Tracer.
+    ASTRA-sim 호환 Multi-GPU Chakra Tracer.
     
-    주요 개선사항:
-    1. 더 많은 iteration 캡처 (최소 5-10회)
-    2. 통신 collective 명시적 캡처
-    3. 완전한 dependency graph
+    파일 네이밍: {trace_name}.{rank}.et
     """
 
     def __init__(
@@ -23,16 +27,16 @@ class ImprovedChakraTracer:
         output_dir: str = "./outputs",
         trace_name: str = "trace",
         enabled: bool = True,
-        wait_steps: int = 5,      # 더 긴 warmup
-        warmup_steps: int = 5,    
-        active_steps: int = 10,   # 더 많은 iteration 캡처
+        wait_steps: int = 5,
+        warmup_steps: int = 5,
+        active_steps: int = 10,  # 최소 10 iterations
         record_shapes: bool = True,
         profile_memory: bool = True,
         with_stack: bool = True,
         with_flops: bool = True,
-        with_modules: bool = True,  # Module hierarchy 포함
-        experimental_config: dict = None,
-        rank: int = 0
+        with_modules: bool = True,
+        rank: int = 0,
+        world_size: int = 1,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -40,30 +44,30 @@ class ImprovedChakraTracer:
         self.trace_name = trace_name
         self.enabled = enabled
         self.rank = rank
+        self.world_size = world_size
 
         if not self.enabled:
             self.profiler = None
             self.et_observer = None
             return
 
-        # ExecutionTraceObserver 설정
-        self.host_trace_path = self.output_dir / f"{self.trace_name}_host.json"
+        # ASTRA-sim 파일 네이밍: trace_name.rank.et
+        # 중간 파일들도 rank 포함
+        self.host_trace_path = self.output_dir / f"{self.trace_name}_rank{self.rank}_host.json"
+        self.device_trace_path = None
+        
+        print(f"[Rank {rank}] ChakraTracer initialized")
+        print(f"  Output: {self.host_trace_path}")
+
+        # ExecutionTraceObserver
         self.et_observer = ExecutionTraceObserver()
         self.et_observer.register_callback(str(self.host_trace_path))
         self.et_started = False
-        self.device_trace_path = None
 
         # Profiler activities
         activities = [profiler.ProfilerActivity.CPU]
         if torch.cuda.is_available():
             activities.append(profiler.ProfilerActivity.CUDA)
-
-        # Experimental config for better trace quality
-        if experimental_config is None:
-            experimental_config = {
-                '_gpu_sync_event': True,  # GPU 동기화 이벤트 캡처
-                'record_concrete_inputs_outputs': True,  # 실제 입출력 캡처
-            }
 
         # Profiler 설정
         self.profiler = profiler.profile(
@@ -71,7 +75,7 @@ class ImprovedChakraTracer:
             schedule=profiler.schedule(
                 wait=wait_steps,
                 warmup=warmup_steps,
-                active=active_steps,  # 최소 10 iterations
+                active=active_steps,
                 repeat=1
             ),
             on_trace_ready=self._trace_handler,
@@ -80,97 +84,28 @@ class ImprovedChakraTracer:
             with_stack=with_stack,
             with_flops=with_flops,
             with_modules=with_modules,
-            experimental_config=experimental_config,
             execution_trace_observer=self.et_observer,
         )
-        
-        self.step_count = 0
-
-    def _validate_and_fix_trace(self, trace_path: Path):
-        """
-        Trace 파일 검증 및 수정.
-        
-        ASTRA-sim 호환성을 위해:
-        1. Node ID 연속성 확인
-        2. Dependency 정보 검증
-        3. Communication collective 명시적 표시
-        """
-        try:
-            with open(trace_path, 'r') as f:
-                trace_data = json.load(f)
-            
-            print(f"[ChakraTracer] Validating trace: {trace_path.name}")
-            
-            # Basic validation
-            if 'nodes' in trace_data:
-                num_nodes = len(trace_data['nodes'])
-                print(f"  - Total nodes: {num_nodes}")
-                
-                # Count operation types
-                op_types = {}
-                comm_ops = 0
-                comp_ops = 0
-                
-                for node in trace_data['nodes']:
-                    op_name = node.get('name', 'unknown')
-                    op_types[op_name] = op_types.get(op_name, 0) + 1
-                    
-                    # Communication operations
-                    if any(comm in op_name.lower() for comm in ['all_reduce', 'all_gather', 'reduce_scatter', 'broadcast']):
-                        comm_ops += 1
-                    # Computation operations  
-                    elif any(comp in op_name.lower() for comp in ['matmul', 'conv', 'linear', 'softmax', 'layernorm']):
-                        comp_ops += 1
-                
-                print(f"  - Communication ops: {comm_ops}")
-                print(f"  - Computation ops: {comp_ops}")
-                print(f"  - Top 5 operation types:")
-                for op, count in sorted(op_types.items(), key=lambda x: x[1], reverse=True)[:5]:
-                    print(f"    * {op}: {count}")
-                
-                # Warning if no communication ops in multi-GPU trace
-                if self.rank == 0 and comm_ops == 0 and 'gpu' in self.trace_name.lower():
-                    if any(x in self.trace_name.lower() for x in ['2gpu', '4gpu', '8gpu']):
-                        print(f"  ⚠️  Warning: No communication ops found in multi-GPU trace!")
-                        print(f"     This may indicate incomplete DDP gradient synchronization capture.")
-                
-                return True
-                
-        except Exception as e:
-            print(f"[ChakraTracer] Warning: Could not validate trace: {e}")
-            return False
 
     def _trace_handler(self, prof):
-        """Trace 준비 완료 시 호출"""
-        print(f"\n{'='*60}")
-        print(f"[ChakraTracer] Processing profiler trace...")
-        print(f"{'='*60}")
+        """Trace 저장"""
+        print(f"\n[Rank {self.rank}] Saving traces...")
 
-        # Kineto device trace 저장
-        device_trace_path = self.output_dir / f"{self.trace_name}_device.json"
-        prof.export_chrome_trace(str(device_trace_path))
-        print(f"[ChakraTracer] ✓ Device trace saved: {device_trace_path}")
+        # Device trace
+        self.device_trace_path = self.output_dir / f"{self.trace_name}_rank{self.rank}_device.json"
+        prof.export_chrome_trace(str(self.device_trace_path))
+        print(f"[Rank {self.rank}] ✓ Device trace: {self.device_trace_path.name}")
 
-        # Stacks 분석
-        stacks_path = self.output_dir / f"{self.trace_name}_stacks.txt"
-        with open(stacks_path, "w") as f:
-            # CPU time
-            f.write("=== CPU Time Stats ===\n")
-            f.write(prof.key_averages(group_by_stack_n=5).table(
-                sort_by="cpu_time_total", row_limit=30
-            ))
-            f.write("\n\n")
-            
-            # CUDA time
-            if torch.cuda.is_available():
-                f.write("=== CUDA Time Stats ===\n")
-                f.write(prof.key_averages(group_by_stack_n=5).table(
-                    sort_by="cuda_time_total", row_limit=30
-                ))
-        
-        print(f"[ChakraTracer] ✓ Stack analysis saved: {stacks_path}")
-
-        self.device_trace_path = device_trace_path
+        # Stack analysis
+        if self.rank == 0:  # 대표로 rank 0만 저장
+            stacks_path = self.output_dir / f"{self.trace_name}_stacks.txt"
+            with open(stacks_path, "w") as f:
+                f.write("=== CPU Time ===\n")
+                f.write(prof.key_averages().table(sort_by="cpu_time_total", row_limit=30))
+                if torch.cuda.is_available():
+                    f.write("\n\n=== CUDA Time ===\n")
+                    f.write(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
+            print(f"[Rank {self.rank}] ✓ Stack analysis: {stacks_path.name}")
 
     def __enter__(self):
         if self.et_observer is not None and not self.et_started:
@@ -189,26 +124,29 @@ class ImprovedChakraTracer:
                 self.et_observer.stop()
                 self.et_started = False
             self.et_observer.unregister_callback()
-            print(f"[ChakraTracer] ✓ Host trace saved: {self.host_trace_path}")
-            
-            # Validate host trace
-            self._validate_and_fix_trace(self.host_trace_path)
+            print(f"[Rank {self.rank}] ✓ Host trace saved: {self.host_trace_path.name}")
 
-        # Link and convert traces
+        # Convert to Chakra ET with ASTRA-sim naming
         if self.device_trace_path is not None:
-            self._link_and_convert_traces()
+            success = self._convert_to_chakra_et()
+            
+            if success and self.rank == 0:
+                self._print_summary()
 
-    def _link_and_convert_traces(self):
-        """Host + Device trace 병합 및 ET 변환"""
-        import subprocess
-
-        merged_trace = self.output_dir / f"{self.trace_name}_merged.json"
-        et_base = self.output_dir / self.trace_name
-        et_file = self.output_dir / f"{self.trace_name}.et"
+    def _convert_to_chakra_et(self):
+        """
+        Host + Device trace를 병합하고 Chakra ET로 변환.
+        
+        최종 파일명: {trace_name}.{rank}.et (ASTRA-sim 규칙)
+        """
+        merged_trace = self.output_dir / f"{self.trace_name}_rank{self.rank}_merged.json"
+        
+        # ASTRA-sim 네이밍: trace_name.rank.et
+        et_file = self.output_dir / f"{self.trace_name}.{self.rank}.et"
 
         try:
-            # Step 1: chakra_trace_link
-            print(f"\n[ChakraTracer] Linking traces...")
+            # Step 1: Link traces
+            print(f"[Rank {self.rank}] Linking traces...")
             result = subprocess.run(
                 [
                     "chakra_trace_link",
@@ -223,13 +161,18 @@ class ImprovedChakraTracer:
             )
 
             if result.returncode != 0:
-                print(f"[ChakraTracer] ✗ Link failed: {result.stderr[:500]}")
+                print(f"[Rank {self.rank}] ✗ Link failed: {result.stderr[:300]}")
                 return False
 
-            print(f"[ChakraTracer] ✓ Traces linked: {merged_trace.name}")
+            print(f"[Rank {self.rank}] ✓ Traces linked")
 
-            # Step 2: chakra_converter
-            print(f"[ChakraTracer] Converting to Chakra ET...")
+            # Step 2: Convert to ET
+            print(f"[Rank {self.rank}] Converting to Chakra ET...")
+            
+            # chakra_converter는 .et 확장자를 자동으로 추가하므로
+            # 확장자 없이 전달
+            et_base = self.output_dir / f"{self.trace_name}.{self.rank}"
+            
             result = subprocess.run(
                 [
                     "chakra_converter", "PyTorch",
@@ -242,39 +185,58 @@ class ImprovedChakraTracer:
             )
 
             if result.returncode != 0:
-                print(f"[ChakraTracer] ✗ Conversion failed: {result.stderr[:500]}")
+                print(f"[Rank {self.rank}] ✗ Conversion failed: {result.stderr[:300]}")
                 return False
 
-            print(f"[ChakraTracer] ✓ ET file created: {et_file.name}")
-            
-            # Validate ET file
+            # 파일 확인
             if et_file.exists():
                 size_mb = et_file.stat().st_size / (1024 * 1024)
-                print(f"[ChakraTracer] ET file size: {size_mb:.2f} MB")
-                
-                # Check if file is too small (may indicate incomplete capture)
-                if size_mb < 0.5:
-                    print(f"[ChakraTracer] ⚠️  Warning: ET file is very small!")
-                    print(f"   Consider increasing active_steps or checking trace quality.")
-            
-            return True
+                print(f"[Rank {self.rank}] ✓ Chakra ET created: {et_file.name} ({size_mb:.2f} MB)")
+                return True
+            else:
+                print(f"[Rank {self.rank}] ✗ ET file not found: {et_file.name}")
+                return False
 
         except FileNotFoundError as e:
-            print(f"[ChakraTracer] ✗ Command not found: {e}")
-            print(f"   Install Chakra tools first!")
+            print(f"[Rank {self.rank}] ✗ Command not found: {e}")
+            print(f"  Install Chakra tools first!")
             return False
         except subprocess.TimeoutExpired:
-            print(f"[ChakraTracer] ✗ Timeout (>10 minutes)")
+            print(f"[Rank {self.rank}] ✗ Timeout")
             return False
         except Exception as e:
-            print(f"[ChakraTracer] ✗ Error: {e}")
+            print(f"[Rank {self.rank}] ✗ Error: {e}")
             return False
+
+    def _print_summary(self):
+        """Rank 0가 전체 결과 요약 출력"""
+        print(f"\n{'='*60}")
+        print(f"Chakra ET Generation Summary")
+        print(f"{'='*60}")
+        print(f"Trace name: {self.trace_name}")
+        print(f"World size: {self.world_size}")
+        print(f"\nGenerated files (ASTRA-sim format):")
+        
+        for rank in range(self.world_size):
+            et_file = self.output_dir / f"{self.trace_name}.{rank}.et"
+            if et_file.exists():
+                size_mb = et_file.stat().st_size / (1024 * 1024)
+                print(f"  ✓ {et_file.name} ({size_mb:.2f} MB)")
+            else:
+                print(f"  ✗ {et_file.name} (missing)")
+        
+        print(f"\nASTRA-sim usage:")
+        print(f"  ./AstraSim_Analytical_Congestion_Unaware \\")
+        print(f"    --workload-configuration={self.output_dir / self.trace_name} \\")
+        print(f"    --system-configuration=system.json \\")
+        print(f"    --network-configuration=network.yml \\")
+        print(f"    --remote-memory-configuration=memory.json")
+        print(f"{'='*60}\n")
 
     def step(self):
         """매 iteration마다 호출"""
         if self.profiler is not None:
             self.profiler.step()
-        self.step_count += 1
 
     def start(self):
         if self.et_observer is not None and not self.et_started:
@@ -289,3 +251,7 @@ class ImprovedChakraTracer:
         if self.et_observer is not None and self.et_started:
             self.et_observer.stop()
             self.et_started = False
+
+
+# Backward compatibility: alias
+ChakraTracer = MultiGPUChakraTracer

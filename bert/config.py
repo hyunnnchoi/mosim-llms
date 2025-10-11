@@ -44,9 +44,9 @@ class BERTConfig:
     enable_tracing: bool = True
     trace_output_dir: str = "./outputs"
     trace_name: str = "bert_trace"
-    trace_wait_steps: int = 1       # 최소화 (계산 그래프 캡처용)
-    trace_warmup_steps: int = 0     # warmup 불필요
-    trace_active_steps: int = 1     # 1 iteration만 profiling
+    trace_wait_steps: int = 5       # 최소화 (계산 그래프 캡처용)
+    trace_warmup_steps: int = 5     # warmup 불필요
+    trace_active_steps: int = 10    # 1 iteration만 profiling
     
     # Evaluation
     eval_steps: int = 500
