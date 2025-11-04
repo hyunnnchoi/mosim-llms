@@ -63,3 +63,4 @@ chakra-venv/
 
 # Keep outputs directory structure
 !outputs/.gitkeep
+outputs/

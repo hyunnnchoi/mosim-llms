@@ -1,0 +1,156 @@
+table tbody, th, td {
+  border: 1px solid #818589 !important;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-left: 5px;
+  padding-right: 5px;
+  text-align: center;
+
+}
+
+tbody td {
+  background: #fff;
+}
+
+tbody td.red {
+  background: #f00;
+  color: #fff;
+}
+
+tbody td.blue {
+  background: #c9daf8;
+}
+
+tbody td.green {
+  background: #d9ead3;
+}
+
+tbody td.gray {
+  background: #f3f3f3;
+}
+
+tbody td.yellow {
+  background: #fff2cc;
+}
+
+/* version-table */
+
+table.version-table tr.end-of-life th {
+  background: #f4cccc;
+}
+table.version-table tr.internal-support th {
+  background: #fce5cd;
+}
+table.version-table tr.maintenance th {
+  background: #fff2cc;
+}
+table.version-table tr.active th {
+  background: #d9ead3;
+  text-decoration: underline;
+}
+table.version-table tr.future th {
+  background: #fff;
+}
+table.version-table tr.future td {
+  font-style: italic;
+}
+
+table.version-table td:nth-child(4) {
+  text-align: start;
+}
+
+/* version-chart */
+
+table.version-chart tr.end-of-life th {
+  background: #f4cccc;
+}
+table.version-chart tr.internal-support th {
+  background: #fce5cd;
+}
+table.version-chart tr.maintenance th {
+  background: #fff2cc;
+}
+table.version-chart tr.active th {
+  background: #d9ead3;
+  text-decoration: underline;
+}
+table.version-chart tr.future th {
+  background: #fff;
+}
+table.version-chart tr.future td {
+  font-style: italic;
+}
+
+table.version-chart td.internal-support {
+  background: #fce5cd;
+}
+table.version-chart td.maintenance {
+  background: #fff2cc;
+}
+table.version-chart td.active {
+  background: #d9ead3;
+  text-decoration: underline;
+}
+
+/* latest release column */
+/*
+ * How to advance the selection of the latest release:
+ * Replace class 'y25q3' in the following selectors with 'y25q4' (the class
+ * referring to the quarter of the next release). Please also update this
+ * instruction as a courtesy to the next maintainer.
+ */
+
+/* visually replace 'yyQq' heading with string 'Latest' */
+table.version-chart th.y25q3 span {
+  display: none;
+}
+table.version-chart th.y25q3::after {
+  content: "Latest"
+}
+
+/* draw a focus rectangle around the latest release column */
+table.version-chart th.y25q3 {
+  border-top: 2px solid #e06666 !important;
+  border-left: 2px solid #e06666 !important;
+  border-right: 2px solid #e06666 !important;
+}
+table.version-chart td.y25q3 {
+  font-weight: bold;
+  border-left: 2px solid #e06666 !important;
+  border-right: 2px solid #e06666 !important;
+}
+table.version-chart tr:last-child td.y25q3 {
+  border-bottom: 2px solid #e06666 !important;
+}
+
+/* future release columns */
+table.version-chart td:not(:has(~ .y25q3)):not(.y25q3) {
+  font-style: italic;
+}
+
+/* legend */
+
+table.legend th {
+  font-weight: normal;
+}
+
+table.legend tr.end-of-life th {
+  background: #f4cccc;
+}
+table.legend tr.internal-support th {
+  background: #fce5cd;
+}
+table.legend tr.maintenance th {
+  background: #fff2cc;
+}
+table.legend tr.active th {
+  background: #d9ead3;
+  text-decoration: underline;
+}
+table.legend tr.future th {
+  background: #fff;
+}
+
+table.legend td:nth-child(2) {
+  text-align: start;
+}
