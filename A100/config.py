@@ -97,11 +97,24 @@ MODEL_CONFIGS = {
         "image_size": 299,
         "learning_rate": 0.1,
     },
+    # ── Whisper (encoder-decoder, synthetic mel-spectrogram) ──
+    "whisper": {
+        "type": "speech",
+        "script": "train_whisper.py",
+        "batch_size": 16,
+        "learning_rate": 5e-4,
+        "num_mel_bins": 80,
+        "mel_seq_len": 3000,       # 30s audio equivalent
+        "max_target_len": 224,
+        "vocab_size": 51865,
+        "dataset": "synthetic",
+    },
 }
 
 ALL_MODELS = list(MODEL_CONFIGS.keys())
 LLM_MODELS = [k for k, v in MODEL_CONFIGS.items() if v["type"] == "llm"]
 CNN_MODELS = [k for k, v in MODEL_CONFIGS.items() if v["type"] == "cnn"]
+SPEECH_MODELS = [k for k, v in MODEL_CONFIGS.items() if v["type"] == "speech"]
 
 # Experiment defaults
 DEFAULT_TOTAL_STEPS = 100

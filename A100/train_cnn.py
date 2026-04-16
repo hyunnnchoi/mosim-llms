@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from torch_cnn_benchmarks.models import create_model, get_model_defaults
 from A100.config import MODEL_CONFIGS, DEFAULT_TOTAL_STEPS, DEFAULT_WARMUP_STEPS, CNN_MODELS
 from A100.metrics import ExperimentMetrics
+from A100.barrier import wait_for_partner, signal_done, should_stop
 
 
 # ── Synthetic dataset for ImageNet-scale models ──
@@ -52,14 +53,19 @@ class SyntheticDataset(Dataset):
 
 def get_cifar10_loader(batch_size: int, image_size: int, num_workers: int,
                        distributed: bool):
-    transform = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
-    dataset = tv_datasets.CIFAR10(root="./data", train=True, download=True,
-                                  transform=transform)
+    # Try loading real CIFAR-10; fall back to synthetic if unavailable (air-gapped env)
+    try:
+        transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+        dataset = tv_datasets.CIFAR10(root="./data", train=True, download=False,
+                                      transform=transform)
+    except RuntimeError:
+        print("[WARN] CIFAR-10 not found locally, using synthetic data (32x32, 10 classes)")
+        dataset = SyntheticDataset(image_size=32, num_classes=10, length=50000)
     sampler = DistributedSampler(dataset, shuffle=True) if distributed else None
     loader = DataLoader(dataset, batch_size=batch_size, sampler=sampler,
                         shuffle=(sampler is None), num_workers=num_workers,
@@ -104,6 +110,13 @@ def parse_args():
     p.add_argument("--partner", type=str, default=None)
     p.add_argument("--output-dir", type=str, default="./A100/results")
     p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--barrier-dir", type=str, default=None)
+    p.add_argument("--role", type=str, choices=["primary", "interferer"], default="primary",
+                   help="primary: fixed steps + save results; interferer: run until primary is done")
+    p.add_argument("--job-id", type=str, default=None,
+                   help="Unique job ID for barrier signaling (defaults to model name)")
+    p.add_argument("--partner-id", type=str, default=None,
+                   help="Partner job ID for barrier signaling (defaults to partner name)")
     return p.parse_args()
 
 
@@ -138,7 +151,10 @@ def main():
     model = create_model(model_name, num_classes=num_classes)
     model = model.to(device)
     if world_size > 1:
-        model = DDP(model, device_ids=[local_rank])
+        # GoogLeNet/Inception have auxiliary heads with unused params during inference-style forward
+        needs_find_unused = model_name in ("googlenet", "inception3")
+        model = DDP(model, device_ids=[local_rank],
+                    find_unused_parameters=needs_find_unused)
 
     # ── Data ──
     train_loader = get_dataloader(model_name, batch_size, args.num_workers,
@@ -155,12 +171,26 @@ def main():
         batch_size=batch_size, total_steps=args.total_steps, warmup_steps=args.warmup_steps,
     )
 
+    # ── Synchronize with partner job before starting ──
+    job_id = args.job_id or model_name
+    partner_id = args.partner_id or args.partner
+    wait_for_partner(args.mode, job_id, partner_id, args.barrier_dir, rank)
+
     # ── Training loop ──
     model.train()
     data_iter = iter(train_loader)
     e2e_start = time.perf_counter()
+    is_primary = args.role == "primary"
+    max_steps = args.total_steps if is_primary else 999999999
 
-    for step in range(args.total_steps):
+    step = 0
+    while step < max_steps:
+        # Interferer: check if primary is done
+        if not is_primary and step > 0 and should_stop(args.barrier_dir, partner_id, rank):
+            if rank == 0:
+                print(f"  [{tag}] interferer stopping at step {step} (primary is done)")
+            break
+
         try:
             inputs, targets = next(data_iter)
         except StopIteration:
@@ -190,26 +220,36 @@ def main():
 
         loss_val = loss.detach().item()
 
-        if step >= args.warmup_steps:
+        if is_primary and step >= args.warmup_steps:
             metrics.iter_times.append(iter_time)
             metrics.losses.append(loss_val)
 
-        if rank == 0 and (step % 10 == 0 or step == args.total_steps - 1):
-            marker = " (warmup)" if step < args.warmup_steps else ""
-            print(f"  [{tag}] step {step:>4d}/{args.total_steps} | "
+        if rank == 0 and (step % 10 == 0 or (is_primary and step == args.total_steps - 1)):
+            role_tag = "P" if is_primary else "I"
+            marker = " (warmup)" if (is_primary and step < args.warmup_steps) else ""
+            print(f"  [{tag}/{role_tag}] step {step:>4d}/{args.total_steps if is_primary else '?'} | "
                   f"loss={loss_val:.4f} | iter={iter_time:.4f}s{marker}")
 
-    torch.cuda.synchronize()
-    metrics.end_to_end_sec = time.perf_counter() - e2e_start
-    metrics.measured_steps = len(metrics.iter_times)
-    metrics.gpu_memory_allocated_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-    metrics.gpu_memory_reserved_mb = torch.cuda.max_memory_reserved(device) / (1024 ** 2)
+        step += 1
 
-    if rank == 0:
-        metrics.save(args.output_dir)
-        print(f"[{tag}] Done. E2E={metrics.end_to_end_sec:.2f}s | "
-              f"iter_mean={metrics.iter_mean:.4f}s | iter_std={metrics.iter_std:.4f}s | "
-              f"throughput={metrics.throughput:.1f} samples/s")
+    torch.cuda.synchronize()
+
+    # Primary: signal done and save results
+    if is_primary:
+        signal_done(args.barrier_dir, job_id, rank)
+        metrics.end_to_end_sec = time.perf_counter() - e2e_start
+        metrics.measured_steps = len(metrics.iter_times)
+        metrics.gpu_memory_allocated_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        metrics.gpu_memory_reserved_mb = torch.cuda.max_memory_reserved(device) / (1024 ** 2)
+
+        if rank == 0:
+            metrics.save(args.output_dir)
+            print(f"[{tag}] Done. E2E={metrics.end_to_end_sec:.2f}s | "
+                  f"iter_mean={metrics.iter_mean:.4f}s | iter_std={metrics.iter_std:.4f}s | "
+                  f"throughput={metrics.throughput:.1f} samples/s")
+    else:
+        if rank == 0:
+            print(f"[{tag}] Interferer finished after {step} steps.")
 
     dist.destroy_process_group()
 

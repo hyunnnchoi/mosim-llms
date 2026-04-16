@@ -25,6 +25,7 @@ from bert.config import BERTConfig
 from utils.data_utils import get_dataloaders
 from A100.config import MODEL_CONFIGS, DEFAULT_TOTAL_STEPS, DEFAULT_WARMUP_STEPS
 from A100.metrics import ExperimentMetrics
+from A100.barrier import wait_for_partner, signal_done, should_stop
 
 
 def parse_args():
@@ -38,6 +39,13 @@ def parse_args():
     p.add_argument("--partner", type=str, default=None, help="Name of co-located model (pair mode)")
     p.add_argument("--output-dir", type=str, default="./A100/results")
     p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--barrier-dir", type=str, default=None)
+    p.add_argument("--role", type=str, choices=["primary", "interferer"], default="primary",
+                   help="primary: fixed steps + save results; interferer: run until primary is done")
+    p.add_argument("--job-id", type=str, default=None,
+                   help="Unique job ID for barrier signaling (defaults to model name)")
+    p.add_argument("--partner-id", type=str, default=None,
+                   help="Partner job ID for barrier signaling (defaults to partner name)")
     return p.parse_args()
 
 
@@ -94,13 +102,26 @@ def main():
         batch_size=batch_size, total_steps=args.total_steps, warmup_steps=args.warmup_steps,
     )
 
+    # ── Synchronize with partner job before starting ──
+    job_id = args.job_id or "bert"
+    partner_id = args.partner_id or args.partner
+    wait_for_partner(args.mode, job_id, partner_id, args.barrier_dir, rank)
+
     # ── Training loop ──
     model.train()
     data_iter = iter(train_loader)
     e2e_start = time.perf_counter()
+    is_primary = args.role == "primary"
+    max_steps = args.total_steps if is_primary else 999999999
 
-    for step in range(args.total_steps):
-        # Cycle data if exhausted
+    step = 0
+    while step < max_steps:
+        # Interferer: check if primary is done
+        if not is_primary and step > 0 and should_stop(args.barrier_dir, partner_id, rank):
+            if rank == 0:
+                print(f"  [BERT] interferer stopping at step {step} (primary is done)")
+            break
+
         try:
             batch = next(data_iter)
         except StopIteration:
@@ -130,26 +151,36 @@ def main():
 
         loss_val = loss.detach().item()
 
-        if step >= args.warmup_steps:
+        if is_primary and step >= args.warmup_steps:
             metrics.iter_times.append(iter_time)
             metrics.losses.append(loss_val)
 
-        if rank == 0 and (step % 10 == 0 or step == args.total_steps - 1):
-            tag = " (warmup)" if step < args.warmup_steps else ""
-            print(f"  [BERT] step {step:>4d}/{args.total_steps} | "
-                  f"loss={loss_val:.4f} | iter={iter_time:.4f}s{tag}")
+        if rank == 0 and (step % 10 == 0 or (is_primary and step == args.total_steps - 1)):
+            role_tag = "P" if is_primary else "I"
+            marker = " (warmup)" if (is_primary and step < args.warmup_steps) else ""
+            print(f"  [BERT/{role_tag}] step {step:>4d}/{args.total_steps if is_primary else '?'} | "
+                  f"loss={loss_val:.4f} | iter={iter_time:.4f}s{marker}")
+
+        step += 1
 
     torch.cuda.synchronize()
-    metrics.end_to_end_sec = time.perf_counter() - e2e_start
-    metrics.measured_steps = len(metrics.iter_times)
-    metrics.gpu_memory_allocated_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-    metrics.gpu_memory_reserved_mb = torch.cuda.max_memory_reserved(device) / (1024 ** 2)
 
-    if rank == 0:
-        metrics.save(args.output_dir)
-        print(f"[BERT] Done. E2E={metrics.end_to_end_sec:.2f}s | "
-              f"iter_mean={metrics.iter_mean:.4f}s | iter_std={metrics.iter_std:.4f}s | "
-              f"throughput={metrics.throughput:.1f} samples/s")
+    # Primary: signal done and save results
+    if is_primary:
+        signal_done(args.barrier_dir, job_id, rank)
+        metrics.end_to_end_sec = time.perf_counter() - e2e_start
+        metrics.measured_steps = len(metrics.iter_times)
+        metrics.gpu_memory_allocated_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        metrics.gpu_memory_reserved_mb = torch.cuda.max_memory_reserved(device) / (1024 ** 2)
+
+        if rank == 0:
+            metrics.save(args.output_dir)
+            print(f"[BERT] Done. E2E={metrics.end_to_end_sec:.2f}s | "
+                  f"iter_mean={metrics.iter_mean:.4f}s | iter_std={metrics.iter_std:.4f}s | "
+                  f"throughput={metrics.throughput:.1f} samples/s")
+    else:
+        if rank == 0:
+            print(f"[BERT] Interferer finished after {step} steps.")
 
     dist.destroy_process_group()
 

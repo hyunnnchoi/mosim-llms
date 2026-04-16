@@ -5,17 +5,25 @@
 # Usage:
 #   bash A100/run_solo.sh <model_name> [total_steps] [gpu_ids]
 #
-# Examples:
-#   bash A100/run_solo.sh gpt2
-#   bash A100/run_solo.sh vgg16 200
-#   bash A100/run_solo.sh bert 100 0,1,2,3
+# Default GPU assignment matches pair topology (cross-NUMA interleaved):
+#   solo uses GPUs 0,2,4,6 — same layout as Job A in pair mode
+#   This ensures solo vs pair comparison is fair (same PCIe paths).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Air-gapped environment: force offline mode for HuggingFace
+export HF_DATASETS_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HUB_OFFLINE=1
+
+# Match pair NCCL settings for fair comparison
+export NCCL_P2P_DISABLE=1
+export NCCL_SHM_DISABLE=1
+
 MODEL="${1:?Usage: $0 <model_name> [total_steps] [gpu_ids]}"
 TOTAL_STEPS="${2:-100}"
-GPU_IDS="${3:-0,1,2,3}"
+GPU_IDS="${3:-0,2,4,6}"
 NPROC=$(echo "$GPU_IDS" | tr ',' '\n' | wc -l | tr -d ' ')
 MASTER_PORT="${MASTER_PORT:-29500}"
 OUTPUT_DIR="./A100/results"
@@ -30,6 +38,7 @@ esac
 echo "============================================"
 echo " SOLO: ${MODEL} on GPUs [${GPU_IDS}]"
 echo " Steps: ${TOTAL_STEPS}, Procs: ${NPROC}"
+echo " NCCL: P2P=off, SHM=off (force PCIe host relay)"
 echo "============================================"
 
 mkdir -p "$OUTPUT_DIR"

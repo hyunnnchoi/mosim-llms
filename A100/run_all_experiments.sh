@@ -12,6 +12,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Air-gapped environment: force offline mode for HuggingFace
+export HF_DATASETS_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HUB_OFFLINE=1
+
 TOTAL_STEPS="${1:-100}"
 RESULTS_DIR="./A100/results"
 LOG_DIR="./A100/logs"
