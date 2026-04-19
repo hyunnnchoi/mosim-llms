@@ -29,3 +29,15 @@
 
 ### 관련 이슈
 - 없음
+
+## [2026-04-19 12:32] A100 results_v2 — 히트맵 플롯 스크립트 및 PDF 이동
+
+### 변경 사항
+| 파일 | 유형 | 설명 |
+|------|------|------|
+| `A100/results_v2/plot_heatmap_v3.py` | 이동 | `~/Downloads/files/`에서 결과 폴더로 이동 (10×10 interference 히트맵 플롯) |
+| `A100/results_v2/00-interference_heatmap_10x10_final_v3.pdf` | 이동 | 히트맵 출력 PDF 이동 |
+
+### 작업 상세
+- 플롯 스크립트와 출력 PDF를 결과 폴더와 함께 보관하기 위해 이동.
+- 참고: 스크립트 내부 경로(`/mnt/user-data/uploads/`, `/home/claude/`)는 외부 환경용 경로 그대로 두었음 (현 시점 수정 요청 없음).
